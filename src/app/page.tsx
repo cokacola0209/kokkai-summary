@@ -85,7 +85,7 @@ function NewsArticleJsonLd({
     description: `${meetingCount}件の国会審議をAIが要約`,
     publisher: {
       "@type": "Organization",
-      name: "国会サマリ",
+      name: "国会ラボ",
     },
   };
   return (
@@ -134,7 +134,7 @@ export default async function HomePage() {
             今日の国会 3分まとめ
           </h1>
           <p className="mt-2 text-slate-500 text-sm">
-            国立国会図書館の会議録をAIが構造化要約。評価語は使用せず、根拠・影響・未解決点を明示しています。
+            国立国会図書館の会議録をもとに、その日の国会審議をAIでわかりやすく整理・要約しています。
           </p>
         </div>
 
@@ -214,8 +214,7 @@ export default async function HomePage() {
             <div className="card">
               <p className="font-semibold text-slate-700 mb-2">⚠️ ご注意</p>
               <p className="text-xs text-slate-500 leading-relaxed">
-                本サービスはAIによる自動要約です。内容の正確性を保証しません。
-                重要事項は必ず一次情報（国立国会図書館）をご確認ください。
+              本サイトはAIによる自動要約サイトです。より正確な国会の内容を確認したい場合は、一次情報（<a href="https://kokkai.ndl.go.jp/" target="_blank" rel="noopener noreferrer" className="underline hover:text-slate-600">国立国会図書館</a>）をご確認ください。
               </p>
             </div>
 

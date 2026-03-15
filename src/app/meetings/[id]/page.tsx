@@ -66,7 +66,7 @@ function MeetingJsonLd({
     datePublished: meeting.date.toISOString(),
     description: meeting.summary?.bullets[0] ?? "",
     mainEntityOfPage: meeting.url,
-    publisher: { "@type": "Organization", name: "国会サマリ" },
+    publisher: { "@type": "Organization", name: "国会ラボ" },
   };
   return (
     <script

@@ -44,7 +44,7 @@ async function callOpenAI(
       max_tokens: opts.maxTokens ?? 2000,
       temperature: opts.temperature ?? 0.2,
     }),
-    cache: "no-store",
+
   });
 
   if (!res.ok) {
@@ -84,7 +84,7 @@ async function callAnthropic(
       })),
       max_tokens: opts.maxTokens ?? 2000,
     }),
-    cache: "no-store",
+
   });
 
   if (!res.ok) {

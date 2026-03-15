@@ -11,15 +11,15 @@ export const metadata: Metadata = {
     process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000"
   ),
   title: {
-    default: "国会サマリ – 今日の国会3分まとめ",
-    template: "%s | 国会サマリ",
+    default: "国会ラボ – 今日の国会3分まとめ",
+    template: "%s | 国会ラボ",
   },
   description:
     "国立国会図書館の会議録検索システムを活用し、毎日の国会審議をAIが構造化要約します。根拠・影響・未解決点を明示。",
   openGraph: {
     type: "website",
     locale: "ja_JP",
-    siteName: "国会サマリ",
+    siteName: "国会ラボ",
   },
   robots: { index: true, follow: true },
 };

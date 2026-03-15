@@ -120,6 +120,15 @@ function safeParseJson<T>(text: string, fallback: T): T {
   .trim();
     return JSON.parse(cleaned) as T;
   } catch {
+    // フォールバック: テキスト内から {...} を直接探す
+    try {
+      const match = text.match(/\{[\s\S]*\}/);
+      if (match) {
+        return JSON.parse(match[0]) as T;
+      }
+    } catch {
+      // それでもダメなら諦める
+    }
     console.warn("[Summarizer] JSON parse failed:", text.slice(0, 200));
     return fallback;
   }
