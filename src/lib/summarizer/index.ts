@@ -115,9 +115,9 @@ function safeParseJson<T>(text: string, fallback: T): T {
   try {
     // コードブロック除去
     const cleaned = text
-      .replace(/^```(?:json)?\n?/m, "")
-      .replace(/\n?```$/m, "")
-      .trim();
+  .replace(/```json\n?/g, "")
+  .replace(/```\n?/g, "")
+  .trim();
     return JSON.parse(cleaned) as T;
   } catch {
     console.warn("[Summarizer] JSON parse failed:", text.slice(0, 200));
@@ -219,7 +219,7 @@ async function reduceMeetingSummary(
     },
   ];
 
-  const result = await callLlm(messages, { maxTokens: 1500, temperature: 0.1 });
+  const result = await callLlm(messages, { maxTokens: 4000, temperature: 0.1 });
 
   const parsed = safeParseJson<Omit<MeetingSummaryJson, "speakerSummaries">>(
     result.text,

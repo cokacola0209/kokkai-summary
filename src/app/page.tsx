@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 import { prisma } from "@/lib/prisma";
 import { SummaryCard, NoData, Section, BulletList, SourceLinks, HouseBadge, TopicTag } from "@/components/ui";
 
-export const revalidate = 3600; // 1時間キャッシュ
+export const revalidate = 0;
 
 export async function generateMetadata(): Promise<Metadata> {
   const latestDate = await prisma.meeting.findFirst({
