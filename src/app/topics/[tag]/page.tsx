@@ -49,7 +49,7 @@ export default async function TopicPage({ params }: Props) {
       }
     }
   }
-  const relatedTags = [...relatedTagCounts.entries()]
+  const relatedTags = Array.from(relatedTagCounts.entries())
     .sort((a, b) => b[1] - a[1])
     .slice(0, 10)
     .map(([t]) => t);
