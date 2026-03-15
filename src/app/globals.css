@@ -1,0 +1,29 @@
+/* src/app/globals.css */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --color-diet-navy: #1a2744;
+    --color-diet-red: #c0392b;
+  }
+}
+
+@layer components {
+  .card {
+    @apply rounded-xl border border-slate-200 bg-white p-5 shadow-sm transition hover:shadow-md;
+  }
+  .badge {
+    @apply inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium;
+  }
+  .badge-house {
+    @apply badge bg-navy-100 text-navy-800;
+  }
+  .section-title {
+    @apply text-lg font-semibold text-slate-800 mb-3;
+  }
+  .quote-block {
+    @apply border-l-4 border-slate-300 pl-4 text-sm text-slate-600 italic my-2;
+  }
+}

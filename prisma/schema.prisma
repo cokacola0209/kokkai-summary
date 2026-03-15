@@ -1,0 +1,63 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model Meeting {
+  id            String   @id @default(cuid())
+  ndlId         String   @unique
+  date          DateTime @db.Date
+  house         String
+  nameOfMeeting String
+  issue         String?
+  url           String
+  rawJson       Json
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  speeches      Speech[]
+  summary       Summary?
+  @@index([date])
+  @@index([house])
+}
+
+model Speech {
+  id           String  @id @default(cuid())
+  meetingId    String
+  speaker      String
+  speakerGroup String?
+  order        Int
+  text         String
+  meeting      Meeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  @@index([meetingId])
+}
+
+model Summary {
+  id               String   @id @default(cuid())
+  meetingId        String   @unique
+  bullets          String[]
+  keyTopics        String[]
+  agreementPoints  String[]
+  conflictPoints   String[]
+  impactNotes      String[]
+  speakerSummaries Json     @default("[]")
+  sourceLinks      String[]
+  modelUsed        String   @default("unknown")
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  meeting          Meeting  @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+}
+
+model FetchLog {
+  id        String   @id @default(cuid())
+  date      DateTime @db.Date
+  status    String
+  fetched   Int      @default(0)
+  errors    String[]
+  createdAt DateTime @default(now())
+  @@index([date])
+}
