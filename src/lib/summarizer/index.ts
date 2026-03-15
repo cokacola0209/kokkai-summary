@@ -164,7 +164,7 @@ async function mapSpeakerSummaries(
   const summaries: SpeakerSummary[] = [];
   let modelUsed = "unknown";
 
-  for (const [speaker, { group, texts }] of speakerMap.entries()) {
+  for (const [speaker, { group, texts }] of Array.from(speakerMap.entries())) {
     // 委員長・議長などの議事進行発言は短ければスキップ
     const totalText = texts.join("").length;
     if (totalText < 50) {
