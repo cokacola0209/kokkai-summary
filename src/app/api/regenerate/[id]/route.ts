@@ -4,6 +4,7 @@
  * POST /api/regenerate/:meetingId
  * Header: Authorization: Bearer <ADMIN_SECRET>
  */
+ export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { regenerateSummary } from "@/lib/summarizer";
 
