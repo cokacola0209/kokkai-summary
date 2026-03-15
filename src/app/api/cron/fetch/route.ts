@@ -9,6 +9,7 @@
  *   "crons": [{ "path": "/api/cron/fetch", "schedule": "0 20 * * *" }]
  * }
  */
+ export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { fetchMeetingsByDate } from "@/lib/ndl/client";
 import { prisma } from "@/lib/prisma";
