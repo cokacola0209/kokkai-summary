@@ -145,7 +145,7 @@
          await upsertSpeeches(meetingId, record.speechRecord ?? []);
          result.fetched++;
 
-         // 2. 要約生成 (既存サマリがなければ生成)
+         // 2. 要約生成 (既存まとめがなければ生成)
          const existingSummary = await prisma.summary.findUnique({
            where: { meetingId },
          });

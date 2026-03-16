@@ -1,12 +1,10 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import {
   SummaryCard,
   NoData,
   Section,
-  BulletList,
-  SourceLinks,
-  HouseBadge,
   TopicTag,
   BeginnerGuide,
   StatCard,
@@ -14,11 +12,24 @@ import {
 
 export const revalidate = 0;
 
+const CATEGORY_KEYWORDS: Record<string, string[]> = {
+  外交: ["外交", "安全保障", "防衛", "日米", "中国", "台湾", "ウクライナ"],
+  物価: ["物価", "賃金", "税", "消費税", "家計", "円安", "ガソリン"],
+  医療: ["医療", "介護", "保険", "病院", "診療", "薬価", "感染症"],
+  教育: ["教育", "学校", "大学", "子ども", "少子化", "保育", "学習"],
+  防災: ["防災", "災害", "地震", "避難", "豪雨", "復旧", "インフラ"],
+  政治改革: ["政治改革", "政治資金", "献金", "選挙", "裏金", "改革"],
+};
+
+const PERSON_PATTERN =
+  /([一-龯々]{1,4})(首相|総理|大臣|議員|委員長|参考人|長官|知事|市長|大統領|幹事長)/g;
+
 export async function generateMetadata(): Promise<Metadata> {
   const latestDate = await prisma.meeting.findFirst({
     orderBy: { date: "desc" },
     select: { date: true },
   });
+
   const dateStr = latestDate
     ? latestDate.date.toLocaleDateString("ja-JP", {
         year: "numeric",
@@ -26,6 +37,7 @@ export async function generateMetadata(): Promise<Metadata> {
         day: "numeric",
       })
     : "";
+
   return {
     title: `今日の国会まとめ${dateStr ? ` – ${dateStr}` : ""}`,
     description: `${dateStr}の国会審議をAIが3分で要約。根拠・影響・未解決点を構造化表示。`,
@@ -37,6 +49,7 @@ async function getLatestMeetings() {
     orderBy: { date: "desc" },
     select: { date: true },
   });
+
   if (!latest) return { meetings: [], date: null };
 
   const meetings = await prisma.meeting.findMany({
@@ -55,11 +68,13 @@ function aggregateTopics(
   meetings: Awaited<ReturnType<typeof getLatestMeetings>>["meetings"]
 ): string[] {
   const counts = new Map<string, number>();
+
   for (const m of meetings) {
     for (const t of m.summary?.keyTopics ?? []) {
       counts.set(t, (counts.get(t) ?? 0) + 1);
     }
   }
+
   return Array.from(counts.entries())
     .sort((a, b) => b[1] - a[1])
     .slice(0, 10)
@@ -77,7 +92,6 @@ function aggregateAgreements(
   );
 }
 
-// 本日の注目ポイント（conflictPoints + impactNotes から抽出）
 function aggregateHighlights(
   meetings: Awaited<ReturnType<typeof getLatestMeetings>>["meetings"]
 ): Array<{ text: string; meeting: string; type: "conflict" | "impact" }> {
@@ -86,6 +100,7 @@ function aggregateHighlights(
     meeting: string;
     type: "conflict" | "impact";
   }> = [];
+
   for (const m of meetings) {
     for (const c of m.summary?.conflictPoints ?? []) {
       items.push({ text: c, meeting: m.nameOfMeeting, type: "conflict" });
@@ -94,12 +109,79 @@ function aggregateHighlights(
       items.push({ text: n, meeting: m.nameOfMeeting, type: "impact" });
     }
   }
+
   return items.slice(0, 5);
 }
 
-// ──────────────────────────────────────────
-// JSON-LD
-// ──────────────────────────────────────────
+const PRIORITY_PEOPLE = [
+  "小野田紀美",
+  "高市早苗",
+  "小泉進次郎",
+  "石破茂",
+  "岩屋毅",
+];
+
+function extractPeopleKeywords(
+  meetings: Awaited<ReturnType<typeof getLatestMeetings>>["meetings"]
+): string[] {
+  const counts = new Map<string, number>();
+
+  for (const m of meetings) {
+    const texts = [
+      m.nameOfMeeting,
+      ...(m.summary?.bullets ?? []),
+      ...(m.summary?.agreementPoints ?? []),
+      ...(m.summary?.conflictPoints ?? []),
+      ...(m.summary?.impactNotes ?? []),
+    ];
+
+    for (const text of texts) {
+      for (const match of text.matchAll(PERSON_PATTERN)) {
+        const name = match[0];
+        counts.set(name, (counts.get(name) ?? 0) + 1);
+      }
+    }
+  }
+
+  return Array.from(counts.entries())
+    .sort((a, b) => {
+      const aPriority = PRIORITY_PEOPLE.indexOf(a[0]);
+      const bPriority = PRIORITY_PEOPLE.indexOf(b[0]);
+
+      const aIsPriority = aPriority !== -1;
+      const bIsPriority = bPriority !== -1;
+
+      if (aIsPriority && bIsPriority) return aPriority - bPriority;
+      if (aIsPriority) return -1;
+      if (bIsPriority) return 1;
+
+      if (b[1] !== a[1]) return b[1] - a[1];
+
+      return a[0].localeCompare(b[0], "ja");
+    })
+    .slice(0, 24)
+    .map(([name]) => name);
+}
+
+function buildCategoryLinks(topics: string[]) {
+  return Object.entries(CATEGORY_KEYWORDS).map(([label, keywords]) => {
+    const matchedTopic =
+      topics.find((topic) =>
+        keywords.some(
+          (keyword) => topic.includes(keyword) || keyword.includes(topic)
+        )
+      ) ?? null;
+
+    return {
+      label,
+      matchedTopic,
+      href: matchedTopic
+        ? `/topics/${encodeURIComponent(matchedTopic)}`
+        : "/meetings",
+    };
+  });
+}
+
 function NewsArticleJsonLd({
   date,
   meetingCount,
@@ -115,6 +197,7 @@ function NewsArticleJsonLd({
     description: `${meetingCount}件の国会審議をAIが要約`,
     publisher: { "@type": "Organization", name: "国会ラボ" },
   };
+
   return (
     <script
       type="application/ld+json"
@@ -123,15 +206,12 @@ function NewsArticleJsonLd({
   );
 }
 
-// ──────────────────────────────────────────
-// Page
-// ──────────────────────────────────────────
 export default async function HomePage() {
   const { meetings, date } = await getLatestMeetings();
 
   if (!date || meetings.length === 0) {
     return (
-      <div className="max-w-5xl mx-auto px-4 py-16">
+      <div className="mx-auto max-w-5xl px-4 py-16">
         <NoData message="まだデータがありません。バッチジョブを実行してください。" />
       </div>
     );
@@ -143,35 +223,41 @@ export default async function HomePage() {
     day: "numeric",
     weekday: "long",
   });
+
   const topTopics = aggregateTopics(meetings);
-  const agreements = aggregateAgreements(meetings);
-  const highlights = aggregateHighlights(meetings);
+const agreements = aggregateAgreements(meetings);
+const highlights = aggregateHighlights(meetings);
+const peopleKeywords = extractPeopleKeywords(meetings);
+
+const categoryLinks = buildCategoryLinks(topTopics);
+const spotlightMeetings = meetings.slice(0, 3);
+
+const topHighlightItems = highlights.slice(0, 3);
+const topAgreementItems = agreements.slice(0, 4);
+
   const meetingsWithSummary = meetings.filter((m) => m.summary);
-  const totalSpeeches = meetings.reduce(
-    (s, m) => s + m._count.speeches,
-    0
-  );
+  const totalSpeeches = meetings.reduce((s, m) => s + m._count.speeches, 0);
 
   return (
     <>
       <NewsArticleJsonLd date={date} meetingCount={meetings.length} />
 
-      <div className="max-w-5xl mx-auto px-4 py-8">
+      <div className="mx-auto max-w-5xl px-4 py-8">
         {/* ── ヘッダ ── */}
         <div className="mb-6 fade-in">
-          <p className="text-sm text-slate-400 mb-1">
+          <p className="mb-1 text-sm text-slate-400">
             {dateStr} の国会 — {meetings.length} 件の審議
           </p>
           <h1 className="text-3xl font-bold text-slate-900">
             今日の国会 3分まとめ
           </h1>
-          <p className="mt-2 text-slate-500 text-sm">
+          <p className="mt-2 text-sm text-slate-500">
             国立国会図書館の会議録をもとに、その日の国会審議をAIでわかりやすく整理・要約しています。
           </p>
         </div>
 
         {/* ── 統計バー ── */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-8 fade-in-up delay-1">
+        <div className="mb-8 grid grid-cols-2 gap-3 fade-in-up delay-1 sm:grid-cols-4">
           <StatCard icon="📋" label="審議件数" value={`${meetings.length}件`} />
           <StatCard
             icon="✅"
@@ -186,84 +272,251 @@ export default async function HomePage() {
           <StatCard
             icon="🏛"
             label="衆/参"
-            value={`${meetings.filter((m) => m.house === "衆議院").length}/${meetings.filter((m) => m.house === "参議院").length}`}
+            value={`${
+              meetings.filter((m) => m.house === "衆議院").length
+            }/${
+              meetings.filter((m) => m.house === "参議院").length
+            }`}
           />
         </div>
 
         {/* ── 初心者向けガイド ── */}
-        <div className="fade-in-up delay-2">
+        <div className="mb-8 fade-in-up delay-2">
           <BeginnerGuide />
         </div>
 
         <div className="grid gap-8 lg:grid-cols-3">
           {/* ── メインカラム ── */}
-          <div className="lg:col-span-2 space-y-6">
+          <div className="space-y-6 lg:col-span-2">
             {/* 本日の注目ポイント */}
-            {highlights.length > 0 && (
-              <Section title="本日の注目ポイント" icon="💡">
-                <div className="space-y-2">
-                  {highlights.map((h, i) => (
-                    <div
-                      key={i}
-                      className={`flex gap-3 rounded-lg p-3 text-sm ${
-                        h.type === "conflict"
-                          ? "bg-red-50/60 border border-red-100"
-                          : "bg-amber-50/60 border border-amber-100"
-                      }`}
-                    >
-                      <span className="shrink-0 mt-0.5">
-                        {h.type === "conflict" ? "⚖️" : "🔍"}
-                      </span>
-                      <div>
-                        <p className="text-slate-700 leading-relaxed">
-                          {h.text}
-                        </p>
-                        <p className="text-xs text-slate-400 mt-1">
-                          {h.meeting}
-                        </p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </Section>
-            )}
+            {topHighlightItems.length > 0 && (
+  <Section title="本日の注目ポイント" icon="💡">
+    <div className="space-y-2">
+      {topHighlightItems.map((h, i) => (
+        <div
+          key={i}
+          className={`flex gap-3 rounded-lg border p-3 text-sm ${
+            h.type === "conflict"
+              ? "border-red-100 bg-red-50/60"
+              : "border-amber-100 bg-amber-50/60"
+          }`}
+        >
+          <span className="mt-0.5 shrink-0">
+            {h.type === "conflict" ? "⚖️" : "🔍"}
+          </span>
+          <div>
+            <p className="leading-relaxed text-slate-700">{h.text}</p>
+            <p className="mt-1 text-xs text-slate-400">{h.meeting}</p>
+          </div>
+        </div>
+      ))}
+    </div>
 
-            {/* 本日のキートピック */}
-            {topTopics.length > 0 && (
-              <Section title="本日の主要トピック" icon="🏷">
-                <div className="flex flex-wrap gap-2">
-                  {topTopics.map((t) => (
-                    <TopicTag key={t} tag={t} />
-                  ))}
-                </div>
-              </Section>
-            )}
+    {highlights.length > topHighlightItems.length && (
+      <div className="mt-3 text-right">
+        <Link
+          href="/meetings"
+          className="text-xs font-medium text-blue-600 hover:text-blue-700"
+        >
+          会議一覧でもっと見る →
+        </Link>
+      </div>
+    )}
+  </Section>
+)}
+
+            {/* ── いま注目の入口 ── */}
+<section className="mb-6 fade-in-up delay-3">
+  <div className="mb-3 flex items-end justify-between gap-3">
+    <div>
+      <h2 className="text-xl font-bold text-slate-900">
+        いま注目の入口
+      </h2>
+      <p className="mt-1 text-sm text-slate-500">
+        気になるテーマや分野から、入口を選べます。
+      </p>
+    </div>
+    <Link
+      href="/meetings"
+      className="text-sm font-medium text-blue-600 hover:text-blue-700"
+    >
+      会議一覧を見る →
+    </Link>
+  </div>
+
+  <div className="grid gap-4 lg:grid-cols-3">
+    {/* テーマ・分野 */}
+    <div className="card lg:col-span-2">
+      <p className="text-sm font-semibold text-slate-800">
+        🔥 注目テーマ・分野
+      </p>
+      <p className="mt-1 text-xs leading-relaxed text-slate-500">
+        今日よく出てきたテーマや、関心分野から入れます。
+      </p>
+
+      <div className="mt-3">
+        <p className="text-xs font-medium text-slate-400">テーマ</p>
+        <div className="mt-2 flex flex-wrap gap-2">
+          {topTopics.length > 0 ? (
+            topTopics.slice(0, 4).map((topic) => (
+              <TopicTag key={topic} tag={topic} />
+            ))
+          ) : (
+            <span className="text-xs text-slate-400">
+              まだテーマがありません
+            </span>
+          )}
+        </div>
+      </div>
+
+      <div className="mt-4">
+        <p className="text-xs font-medium text-slate-400">分野</p>
+        <div className="mt-2 flex flex-wrap gap-2">
+          {categoryLinks.map((item) => (
+            <Link
+              key={item.label}
+              href={item.href}
+              className="inline-flex items-center rounded-full border border-slate-200 bg-white px-3 py-1 text-xs text-slate-600 transition-colors hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
+            >
+              {item.label}
+            </Link>
+          ))}
+        </div>
+      </div>
+    </div>
+
+    <div className="space-y-4">
+      {/* 人物キーワード */}
+<div className="card">
+  <div className="flex items-center justify-between gap-3">
+    <p className="text-sm font-semibold text-slate-800">
+      👤 人物キーワード
+    </p>
+    <Link
+      href="/meetings"
+      className="text-xs text-slate-400 hover:text-slate-600"
+    >
+      一覧へ
+    </Link>
+  </div>
+
+  <p className="mt-1 text-xs leading-relaxed text-slate-500">
+    気になる人物名から、その人が出てくる会議を絞り込めます。
+  </p>
+
+  <div className="mt-3">
+  {peopleKeywords.length > 0 ? (
+    <>
+      <div className="relative">
+        <div className="max-h-[72px] overflow-hidden">
+          <div className="flex flex-wrap gap-2">
+            {peopleKeywords.map((name) => (
+              <Link
+                key={name}
+                href={`/meetings?person=${encodeURIComponent(name)}`}
+                className="inline-flex whitespace-nowrap items-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs text-slate-600 transition-colors hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
+              >
+                {name}
+              </Link>
+            ))}
+          </div>
+        </div>
+
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-white to-transparent" />
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+        <p className="text-xs text-slate-400">
+          クリックすると会議一覧でその人物を含む会議に絞り込みます。
+        </p>
+
+        <Link
+  href="/people"
+  className="text-xs font-medium text-blue-600 hover:text-blue-700"
+>
+  人物一覧を見る →
+</Link>
+      </div>
+    </>
+  ) : (
+    <span className="text-xs text-slate-400">
+      人物キーワードはまだ少なめです
+    </span>
+  )}
+</div>
+</div>
+
+      {/* 今日の会議 */}
+      <div className="card">
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-sm font-semibold text-slate-800">
+            📌 今日の会議
+          </p>
+          <Link
+            href="/meetings"
+            className="text-xs text-blue-600 hover:text-blue-700"
+          >
+            もっと見る →
+          </Link>
+        </div>
+
+        <div className="mt-3 space-y-2">
+          {spotlightMeetings.slice(0, 2).map((meeting) => (
+            <Link
+              key={meeting.id}
+              href={`/meetings/${meeting.id}`}
+              className="block rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 transition-colors hover:border-blue-200 hover:bg-blue-50"
+            >
+              <p className="text-xs text-slate-400">{meeting.house}</p>
+              <p className="mt-1 text-sm leading-snug text-slate-700">
+                {meeting.nameOfMeeting}
+              </p>
+            </Link>
+          ))}
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+
 
             {/* 本日の合意・採決事項 */}
-            {agreements.length > 0 && (
-              <Section title="本日の主な合意・採決事項" icon="✅">
-                <div className="card">
-                  <ul className="space-y-2">
-                    {agreements.map((a, i) => (
-                      <li key={i} className="text-sm flex gap-2">
-                        <span className="text-green-500 font-medium shrink-0 mt-0.5">
-                          ▸
-                        </span>
-                        <div>
-                          <span className="text-slate-700">{a.text}</span>
-                          <span className="text-xs text-slate-400 ml-2">
-                            [{a.meeting}]
-                          </span>
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              </Section>
-            )}
+            {topAgreementItems.length > 0 && (
+  <Section title="本日の主な合意・採決事項" icon="✅">
+    <div className="card">
+      <ul className="space-y-2">
+        {topAgreementItems.map((a, i) => (
+          <li key={i} className="flex gap-2 text-sm">
+            <span className="mt-0.5 shrink-0 font-medium text-green-500">
+              ▸
+            </span>
+            <div>
+              <span className="text-slate-700">{a.text}</span>
+              <span className="ml-2 text-xs text-slate-400">
+                [{a.meeting}]
+              </span>
+            </div>
+          </li>
+        ))}
+      </ul>
 
-            {/* 会議別サマリ */}
-            <Section title={`会議別サマリ（${meetings.length}件）`} icon="📋">
+      {agreements.length > topAgreementItems.length && (
+        <div className="mt-3 text-right">
+          <Link
+            href="/meetings"
+            className="text-xs font-medium text-blue-600 hover:text-blue-700"
+          >
+            続きを会議一覧で見る →
+          </Link>
+        </div>
+      )}
+    </div>
+  </Section>
+)}
+
+            {/* 会議別まとめ */}
+            <Section title={`会議別まとめ（${meetings.length}件）`} icon="📋">
               <div className="space-y-4">
                 {meetings.map((m) => (
                   <SummaryCard
@@ -283,8 +536,8 @@ export default async function HomePage() {
           {/* ── サイドバー ── */}
           <aside className="space-y-4">
             <div className="card">
-              <p className="font-semibold text-slate-700 mb-2">⚠️ ご注意</p>
-              <p className="text-xs text-slate-500 leading-relaxed">
+              <p className="mb-2 font-semibold text-slate-700">⚠️ ご注意</p>
+              <p className="text-xs leading-relaxed text-slate-500">
                 本サイトはAIによる自動要約サイトです。より正確な国会の内容を確認したい場合は、一次情報（
                 <a
                   href="https://kokkai.ndl.go.jp/"
@@ -299,24 +552,22 @@ export default async function HomePage() {
             </div>
 
             <div className="card">
-              <p className="font-semibold text-slate-700 mb-3">🏛 院別の内訳</p>
+              <p className="mb-3 font-semibold text-slate-700">🏛 院別の内訳</p>
               <div className="space-y-2">
                 {["衆議院", "参議院"].map((house) => {
-                  const count = meetings.filter(
-                    (m) => m.house === house
-                  ).length;
+                  const count = meetings.filter((m) => m.house === house).length;
                   const pct =
                     meetings.length > 0
                       ? Math.round((count / meetings.length) * 100)
                       : 0;
+
                   return (
                     <div key={house}>
-                      <div className="flex justify-between text-sm mb-1">
-                        <HouseBadge house={house} />
+                      <div className="mb-1 flex justify-between text-sm">
+                        <span className="text-slate-600">{house}</span>
                         <span className="text-slate-500">{count} 件</span>
                       </div>
-                      {/* プログレスバー */}
-                      <div className="h-1.5 rounded-full bg-slate-100 overflow-hidden">
+                      <div className="h-1.5 overflow-hidden rounded-full bg-slate-100">
                         <div
                           className={`h-full rounded-full ${
                             house === "衆議院" ? "bg-blue-400" : "bg-green-400"
@@ -330,15 +581,14 @@ export default async function HomePage() {
               </div>
             </div>
 
-            {/* 全件を見る導線 */}
-            <a
+            <Link
               href="/meetings"
               className="block card text-center hover:border-blue-300"
             >
               <p className="text-sm font-medium text-blue-600">
                 📚 過去の会議一覧を見る →
               </p>
-            </a>
+            </Link>
           </aside>
         </div>
       </div>

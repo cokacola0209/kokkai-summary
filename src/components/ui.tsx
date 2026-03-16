@@ -119,6 +119,107 @@ export function SummaryCard({
 }
 
 // ──────────────────────────────────────────
+// MeetingListCard (一覧ページ専用)
+// ──────────────────────────────────────────
+interface MeetingListCardProps {
+  id: string;
+  house: string;
+  nameOfMeeting: string;
+  agreementPoints: string[];
+  conflictPoints: string[];
+  keyTopics: string[];
+}
+
+export function MeetingListCard({
+  id,
+  house,
+  nameOfMeeting,
+  agreementPoints,
+  conflictPoints,
+  keyTopics,
+}: MeetingListCardProps) {
+  const meetingType = getMeetingType(nameOfMeeting);
+
+  const agreementText =
+    agreementPoints[0] ?? "この会議では説明・確認・審議の進行が中心でした。";
+
+  const conflictText =
+    conflictPoints[0] ?? "この要約では大きな対立点は強く示されていません。";
+
+  const visibleTopics = keyTopics.slice(0, 3);
+
+  return (
+    <Link
+      href={`/meetings/${id}`}
+      className="group block rounded-xl border border-slate-200 bg-white p-4 transition-all duration-150 hover:border-blue-300 hover:shadow-sm"
+    >
+      {/* 上段メタ情報 */}
+      <div className="mb-3 flex items-center gap-2">
+        <HouseBadge house={house} />
+        {meetingType && (
+          <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2.5 py-0.5 text-xs text-slate-500">
+            {meetingType}
+          </span>
+        )}
+      </div>
+
+      {/* 1行目: 会議名 */}
+      <h2 className="line-clamp-2 text-[15px] font-semibold leading-snug text-slate-800 transition-colors group-hover:text-blue-700 sm:text-base">
+        {nameOfMeeting}
+      </h2>
+
+      {/* 2〜3行目: 決まったこと / 争点 */}
+      <div className="mt-3 space-y-2">
+        <div className="rounded-lg bg-slate-50 px-3 py-2">
+          <p className="text-[11px] font-medium text-slate-500">
+            何が決まったか
+          </p>
+          <p className="mt-1 line-clamp-2 text-sm leading-6 text-slate-700">
+            {agreementText}
+          </p>
+        </div>
+
+        <div className="rounded-lg bg-slate-50 px-3 py-2">
+          <p className="text-[11px] font-medium text-slate-500">
+            主な争点
+          </p>
+          <p
+            className={`mt-1 line-clamp-2 text-sm leading-6 ${
+              conflictPoints.length > 0 ? "text-slate-700" : "text-slate-400"
+            }`}
+          >
+            {conflictText}
+          </p>
+        </div>
+      </div>
+
+      {/* 4行目: タグ少数 */}
+      <div className="mt-3 flex flex-wrap gap-1.5">
+        {visibleTopics.length > 0 ? (
+          <>
+            {visibleTopics.map((topic) => (
+              <span
+                key={topic}
+                className="inline-block rounded-full bg-slate-100 px-2.5 py-1 text-xs text-slate-500"
+              >
+                #{topic}
+              </span>
+            ))}
+            {keyTopics.length > visibleTopics.length && (
+              <span className="inline-block rounded-full bg-slate-50 px-2.5 py-1 text-xs text-slate-400">
+                +{keyTopics.length - visibleTopics.length}
+              </span>
+            )}
+          </>
+        ) : (
+          <span className="text-xs text-slate-400">タグなし</span>
+        )}
+      </div>
+    </Link>
+  );
+}
+
+// ──────────────────────────────────────────
 // Section wrapper — 改善版
 // ──────────────────────────────────────────
 export function Section({

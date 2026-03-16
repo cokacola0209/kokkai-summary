@@ -2,8 +2,8 @@
 /**
  * 要約生成モジュール (map-reduce 戦略)
  *
- * 1. Map  : 発言者ごとに発言をまとめてサマリ生成
- * 2. Reduce: 発言者サマリを統合して会議全体サマリ生成
+ * 1. Map  : 発言者ごとに発言をまとめてまとめ生成
+ * 2. Reduce: 発言者まとめを統合して会議全体まとめ生成
  *
  * 禁止事項:
  *   - 「評価語」(優れた、素晴らしいなど) の使用禁止
@@ -59,9 +59,9 @@ const SPEAKER_SUMMARY_PROMPT = (
 ${speeches.map((s, i) => `[発言${i + 1}]\n${s}`).join("\n\n")}
 --- ここまで ---
 
-以下の JSON スキーマで発言者サマリを生成してください:
+以下の JSON スキーマで発言者ごとの要点を生成してください:
 {
-  "summary": "発言者の主張・立場を200字以内で要約 (評価語禁止・引用必須)",
+  "summary": "の主張・立場を200字以内で要約 (評価語禁止・引用必須)",
   "quotes": ["重要発言の原文抜粋1", "重要発言の原文抜粋2"] // 最大3点
 }
 
@@ -78,7 +78,7 @@ const MEETING_SUMMARY_PROMPT = (
 会議名: ${house} ${nameOfMeeting} (${date})
 一次情報: ${meetingUrl}
 
---- 発言者別サマリ ---
+--- 発言者別まとめ ---
 ${speakerSummaries
   .map(
     (s) =>
@@ -87,7 +87,7 @@ ${speakerSummaries
   .join("\n\n")}
 --- ここまで ---
 
-以下の JSON スキーマで会議全体サマリを生成してください:
+以下の JSON スキーマで会議全体まとめを生成してください:
 {
   "bullets": [
     "議題・決議事項を箇条書き。各項目に (根拠: 発言者名「引用」) を付記。3〜7点。"
@@ -150,7 +150,7 @@ function truncateSpeeches(speeches: string[], maxCharsTotal = 6000): string[] {
 }
 
 // ──────────────────────────────────────────
-// Map フェーズ: 発言者ごとサマリ
+// Map フェーズ: 発言者ごとまとめ
 // ──────────────────────────────────────────
 
 async function mapSpeakerSummaries(
@@ -207,7 +207,7 @@ async function mapSpeakerSummaries(
 }
 
 // ──────────────────────────────────────────
-// Reduce フェーズ: 会議全体サマリ
+// Reduce フェーズ: 会議全体まとめ
 // ──────────────────────────────────────────
 
 async function reduceMeetingSummary(
