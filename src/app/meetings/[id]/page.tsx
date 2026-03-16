@@ -1,4 +1,3 @@
-// src/app/meetings/[id]/page.tsx
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import Link from "next/link";
@@ -9,6 +8,7 @@ import {
   Section,
   BulletList,
   SourceLinks,
+  HighlightBox,
 } from "@/components/ui";
 
 export const revalidate = 3600;
@@ -31,6 +31,47 @@ async function getMeeting(id: string) {
   return meeting;
 }
 
+// 関連会議（同日 or 同じキートピック）
+async function getRelatedMeetings(
+  meetingId: string,
+  date: Date,
+  keyTopics: string[]
+) {
+  // 同日の他の会議
+  const sameDayMeetings = await prisma.meeting.findMany({
+    where: {
+      date,
+      id: { not: meetingId },
+    },
+    include: {
+      summary: { select: { bullets: true, keyTopics: true } },
+    },
+    take: 4,
+    orderBy: { nameOfMeeting: "asc" },
+  });
+
+  // 同じトピックの会議（別日）
+  let topicMeetings: typeof sameDayMeetings = [];
+  if (keyTopics.length > 0) {
+    topicMeetings = await prisma.meeting.findMany({
+      where: {
+        id: { not: meetingId },
+        date: { not: date },
+        summary: {
+          keyTopics: { hasSome: keyTopics.slice(0, 3) },
+        },
+      },
+      include: {
+        summary: { select: { bullets: true, keyTopics: true } },
+      },
+      take: 3,
+      orderBy: { date: "desc" },
+    });
+  }
+
+  return { sameDayMeetings, topicMeetings };
+}
+
 // ──────────────────────────────────────────
 // SEO
 // ──────────────────────────────────────────
@@ -39,7 +80,8 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   if (!meeting) return { title: "会議が見つかりません" };
 
   const dateStr = meeting.date.toLocaleDateString("ja-JP");
-  const desc = meeting.summary?.bullets[0] ?? `${meeting.nameOfMeeting}の会議録要約`;
+  const desc =
+    meeting.summary?.bullets[0] ?? `${meeting.nameOfMeeting}の会議録要約`;
 
   return {
     title: `${meeting.nameOfMeeting} – ${dateStr}`,
@@ -90,19 +132,25 @@ function SpeakerCard({ s }: { s: SpeakerSummary }) {
   return (
     <div className="card">
       <div className="flex items-center gap-2 mb-2">
-        <span className="text-lg">👤</span>
+        <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-sm">
+          👤
+        </div>
         <div>
           <p className="font-semibold text-slate-800 text-sm">{s.speaker}</p>
-          {s.group && <p className="text-xs text-slate-400">{s.group}</p>}
+          {s.group && (
+            <p className="text-xs text-slate-400">{s.group}</p>
+          )}
         </div>
       </div>
-      <p className="text-sm text-slate-700 mb-2">{s.summary}</p>
+      <p className="text-sm text-slate-700 leading-relaxed mb-2">
+        {s.summary}
+      </p>
       {s.quotes.length > 0 && (
-        <div className="space-y-1">
+        <div className="space-y-1.5">
           {s.quotes.map((q, i) => (
             <blockquote
               key={i}
-              className="border-l-4 border-slate-200 pl-3 text-xs text-slate-500 italic"
+              className="border-l-4 border-slate-200 pl-3 text-xs text-slate-500 italic leading-relaxed"
             >
               「{q}」
             </blockquote>
@@ -114,6 +162,43 @@ function SpeakerCard({ s }: { s: SpeakerSummary }) {
 }
 
 // ──────────────────────────────────────────
+// 関連会議カード（小型）
+// ──────────────────────────────────────────
+function RelatedMeetingLink({
+  meeting,
+}: {
+  meeting: {
+    id: string;
+    date: Date;
+    house: string;
+    nameOfMeeting: string;
+    summary: { bullets: string[]; keyTopics: string[] } | null;
+  };
+}) {
+  return (
+    <Link
+      href={`/meetings/${meeting.id}`}
+      className="block rounded-lg border border-slate-100 bg-white p-3 hover:border-blue-200 hover:shadow-sm transition-all"
+    >
+      <div className="flex items-center gap-2 mb-1">
+        <HouseBadge house={meeting.house} />
+        <span className="text-xs text-slate-400">
+          {meeting.date.toLocaleDateString("ja-JP")}
+        </span>
+      </div>
+      <p className="text-sm font-medium text-slate-700 line-clamp-1">
+        {meeting.nameOfMeeting}
+      </p>
+      {meeting.summary?.bullets[0] && (
+        <p className="text-xs text-slate-500 mt-1 line-clamp-1">
+          {meeting.summary.bullets[0]}
+        </p>
+      )}
+    </Link>
+  );
+}
+
+// ──────────────────────────────────────────
 // Page
 // ──────────────────────────────────────────
 export default async function MeetingDetailPage({ params }: Props) {
@@ -121,7 +206,8 @@ export default async function MeetingDetailPage({ params }: Props) {
   if (!meeting) notFound();
 
   const summary = meeting.summary;
-  const speakerSummaries = (summary?.speakerSummaries as SpeakerSummary[] | null) ?? [];
+  const speakerSummaries =
+    (summary?.speakerSummaries as SpeakerSummary[] | null) ?? [];
   const dateStr = meeting.date.toLocaleDateString("ja-JP", {
     year: "numeric",
     month: "long",
@@ -129,26 +215,33 @@ export default async function MeetingDetailPage({ params }: Props) {
     weekday: "long",
   });
 
+  // 関連会議を取得
+  const { sameDayMeetings, topicMeetings } = await getRelatedMeetings(
+    meeting.id,
+    meeting.date,
+    summary?.keyTopics ?? []
+  );
+
   return (
     <>
       <MeetingJsonLd meeting={meeting} />
 
       <div className="max-w-5xl mx-auto px-4 py-8">
         {/* パンくず */}
-        <nav className="text-sm text-slate-400 mb-4">
-          <Link href="/" className="hover:text-slate-600">
+        <nav className="text-sm text-slate-400 mb-4 fade-in">
+          <Link href="/" className="hover:text-slate-600 transition">
             ホーム
           </Link>{" "}
           /{" "}
-          <Link href="/meetings" className="hover:text-slate-600">
+          <Link href="/meetings" className="hover:text-slate-600 transition">
             会議一覧
           </Link>{" "}
-          / {meeting.nameOfMeeting}
+          / <span className="text-slate-600">{meeting.nameOfMeeting}</span>
         </nav>
 
-        {/* ヘッダ */}
-        <div className="mb-8">
-          <div className="flex items-center gap-3 mb-2">
+        {/* ── ヘッダ ── */}
+        <div className="mb-6 fade-in">
+          <div className="flex flex-wrap items-center gap-3 mb-2">
             <HouseBadge house={meeting.house} />
             <p className="text-sm text-slate-400">{dateStr}</p>
             {meeting.issue && (
@@ -157,27 +250,39 @@ export default async function MeetingDetailPage({ params }: Props) {
               </span>
             )}
           </div>
-          <h1 className="text-2xl font-bold text-slate-900">
+          <h1 className="text-2xl font-bold text-slate-900 leading-tight">
             {meeting.nameOfMeeting}
           </h1>
-          <div className="mt-3 flex gap-4 text-sm text-slate-500">
-            <span>発言 {meeting.speeches.length} 件</span>
+          <div className="mt-3 flex flex-wrap gap-4 text-sm text-slate-500">
+            <span className="flex items-center gap-1">
+              💬 発言 {meeting.speeches.length} 件
+            </span>
             <a
               href={meeting.url}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-blue-600 underline hover:text-blue-800"
+              className="flex items-center gap-1 text-blue-600 hover:text-blue-800 transition"
             >
               📄 一次情報を見る
             </a>
           </div>
         </div>
 
-        <div className="grid gap-6 lg:grid-cols-3">
-          {/* メインカラム */}
+        {/* ── 「この会議の見どころ」ハイライト ── */}
+        {summary && (
+          <HighlightBox
+            bullets={summary.bullets}
+            conflictPoints={summary.conflictPoints}
+            impactNotes={summary.impactNotes}
+            agreementPoints={summary.agreementPoints}
+          />
+        )}
+
+        <div className="grid gap-8 lg:grid-cols-3">
+          {/* ── メインカラム ── */}
           <div className="lg:col-span-2 space-y-6">
             {!summary ? (
-              <div className="card text-center py-10">
+              <div className="card text-center py-12">
                 <p className="text-slate-400">要約を生成中です…</p>
               </div>
             ) : (
@@ -193,7 +298,7 @@ export default async function MeetingDetailPage({ params }: Props) {
                   </Section>
                 )}
 
-                {/* 要約箇条書き */}
+                {/* 議事要約 */}
                 <Section title="議事要約" icon="📋">
                   <div className="card">
                     <BulletList items={summary.bullets} color="blue" />
@@ -203,7 +308,10 @@ export default async function MeetingDetailPage({ params }: Props) {
                 {/* 合意事項 */}
                 <Section title="合意・採決事項" icon="✅">
                   <div className="card">
-                    <BulletList items={summary.agreementPoints} color="green" />
+                    <BulletList
+                      items={summary.agreementPoints}
+                      color="green"
+                    />
                   </div>
                 </Section>
 
@@ -225,16 +333,19 @@ export default async function MeetingDetailPage({ params }: Props) {
                 <SourceLinks links={summary.sourceLinks} />
 
                 {/* モデル情報 */}
-                <p className="text-xs text-slate-300">
-                  要約モデル: {summary.modelUsed} /{" "}
-                  更新: {summary.updatedAt.toLocaleDateString("ja-JP")}
+                <p className="text-xs text-slate-300 mt-4">
+                  要約モデル: {summary.modelUsed} / 更新:{" "}
+                  {summary.updatedAt.toLocaleDateString("ja-JP")}
                 </p>
               </>
             )}
 
             {/* 発言者別サマリ */}
             {speakerSummaries.length > 0 && (
-              <Section title={`発言者別サマリ（${speakerSummaries.length}名）`} icon="👥">
+              <Section
+                title={`発言者別サマリ（${speakerSummaries.length}名）`}
+                icon="👥"
+              >
                 <div className="grid gap-3 sm:grid-cols-2">
                   {speakerSummaries.map((s, i) => (
                     <SpeakerCard key={i} s={s} />
@@ -242,9 +353,42 @@ export default async function MeetingDetailPage({ params }: Props) {
                 </div>
               </Section>
             )}
+
+            {/* ── 関連会議 ── */}
+            {(sameDayMeetings.length > 0 || topicMeetings.length > 0) && (
+              <Section title="関連する会議" icon="🔗">
+                {/* 同日の他の会議 */}
+                {sameDayMeetings.length > 0 && (
+                  <div className="mb-4">
+                    <p className="text-xs font-medium text-slate-500 mb-2">
+                      📅 同日の会議
+                    </p>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      {sameDayMeetings.map((m) => (
+                        <RelatedMeetingLink key={m.id} meeting={m} />
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* 同じトピックの会議 */}
+                {topicMeetings.length > 0 && (
+                  <div>
+                    <p className="text-xs font-medium text-slate-500 mb-2">
+                      🏷 同じトピックの会議
+                    </p>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      {topicMeetings.map((m) => (
+                        <RelatedMeetingLink key={m.id} meeting={m} />
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </Section>
+            )}
           </div>
 
-          {/* サイドバー: 発言一覧 (折りたたみ) */}
+          {/* ── サイドバー ── */}
           <aside>
             <div className="card sticky top-20">
               <p className="font-semibold text-slate-700 mb-3">
@@ -264,7 +408,7 @@ export default async function MeetingDetailPage({ params }: Props) {
                         </span>
                       )}
                     </p>
-                    <p className="text-xs text-slate-500 mt-0.5 line-clamp-3">
+                    <p className="text-xs text-slate-500 mt-0.5 line-clamp-3 leading-relaxed">
                       {sp.text}
                     </p>
                   </div>

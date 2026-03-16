@@ -1,7 +1,16 @@
-// src/app/page.tsx
 import type { Metadata } from "next";
 import { prisma } from "@/lib/prisma";
-import { SummaryCard, NoData, Section, BulletList, SourceLinks, HouseBadge, TopicTag } from "@/components/ui";
+import {
+  SummaryCard,
+  NoData,
+  Section,
+  BulletList,
+  SourceLinks,
+  HouseBadge,
+  TopicTag,
+  BeginnerGuide,
+  StatCard,
+} from "@/components/ui";
 
 export const revalidate = 0;
 
@@ -11,7 +20,11 @@ export async function generateMetadata(): Promise<Metadata> {
     select: { date: true },
   });
   const dateStr = latestDate
-    ? latestDate.date.toLocaleDateString("ja-JP", { year: "numeric", month: "long", day: "numeric" })
+    ? latestDate.date.toLocaleDateString("ja-JP", {
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+      })
     : "";
   return {
     title: `今日の国会まとめ${dateStr ? ` – ${dateStr}` : ""}`,
@@ -20,7 +33,6 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 async function getLatestMeetings() {
-  // 最新日付の会議を取得
   const latest = await prisma.meeting.findFirst({
     orderBy: { date: "desc" },
     select: { date: true },
@@ -39,7 +51,6 @@ async function getLatestMeetings() {
   return { meetings, date: latest.date };
 }
 
-// 全会議のキートピックを集約してトップ10抽出
 function aggregateTopics(
   meetings: Awaited<ReturnType<typeof getLatestMeetings>>["meetings"]
 ): string[] {
@@ -55,7 +66,6 @@ function aggregateTopics(
     .map(([t]) => t);
 }
 
-// 全会議の agreementPoints をまとめる
 function aggregateAgreements(
   meetings: Awaited<ReturnType<typeof getLatestMeetings>>["meetings"]
 ): Array<{ text: string; meeting: string }> {
@@ -67,8 +77,28 @@ function aggregateAgreements(
   );
 }
 
+// 本日の注目ポイント（conflictPoints + impactNotes から抽出）
+function aggregateHighlights(
+  meetings: Awaited<ReturnType<typeof getLatestMeetings>>["meetings"]
+): Array<{ text: string; meeting: string; type: "conflict" | "impact" }> {
+  const items: Array<{
+    text: string;
+    meeting: string;
+    type: "conflict" | "impact";
+  }> = [];
+  for (const m of meetings) {
+    for (const c of m.summary?.conflictPoints ?? []) {
+      items.push({ text: c, meeting: m.nameOfMeeting, type: "conflict" });
+    }
+    for (const n of m.summary?.impactNotes ?? []) {
+      items.push({ text: n, meeting: m.nameOfMeeting, type: "impact" });
+    }
+  }
+  return items.slice(0, 5);
+}
+
 // ──────────────────────────────────────────
-// JSON-LD 構造化データ
+// JSON-LD
 // ──────────────────────────────────────────
 function NewsArticleJsonLd({
   date,
@@ -83,10 +113,7 @@ function NewsArticleJsonLd({
     headline: `${date.toLocaleDateString("ja-JP")}の国会審議まとめ`,
     datePublished: date.toISOString(),
     description: `${meetingCount}件の国会審議をAIが要約`,
-    publisher: {
-      "@type": "Organization",
-      name: "国会ラボ",
-    },
+    publisher: { "@type": "Organization", name: "国会ラボ" },
   };
   return (
     <script
@@ -118,15 +145,20 @@ export default async function HomePage() {
   });
   const topTopics = aggregateTopics(meetings);
   const agreements = aggregateAgreements(meetings);
+  const highlights = aggregateHighlights(meetings);
   const meetingsWithSummary = meetings.filter((m) => m.summary);
+  const totalSpeeches = meetings.reduce(
+    (s, m) => s + m._count.speeches,
+    0
+  );
 
   return (
     <>
       <NewsArticleJsonLd date={date} meetingCount={meetings.length} />
 
       <div className="max-w-5xl mx-auto px-4 py-8">
-        {/* ヘッダ */}
-        <div className="mb-8">
+        {/* ── ヘッダ ── */}
+        <div className="mb-6 fade-in">
           <p className="text-sm text-slate-400 mb-1">
             {dateStr} の国会 — {meetings.length} 件の審議
           </p>
@@ -138,9 +170,64 @@ export default async function HomePage() {
           </p>
         </div>
 
-        <div className="grid gap-6 lg:grid-cols-3">
-          {/* メインカラム */}
+        {/* ── 統計バー ── */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-8 fade-in-up delay-1">
+          <StatCard icon="📋" label="審議件数" value={`${meetings.length}件`} />
+          <StatCard
+            icon="✅"
+            label="要約済み"
+            value={`${meetingsWithSummary.length}件`}
+          />
+          <StatCard
+            icon="💬"
+            label="総発言数"
+            value={`${totalSpeeches.toLocaleString()}`}
+          />
+          <StatCard
+            icon="🏛"
+            label="衆/参"
+            value={`${meetings.filter((m) => m.house === "衆議院").length}/${meetings.filter((m) => m.house === "参議院").length}`}
+          />
+        </div>
+
+        {/* ── 初心者向けガイド ── */}
+        <div className="fade-in-up delay-2">
+          <BeginnerGuide />
+        </div>
+
+        <div className="grid gap-8 lg:grid-cols-3">
+          {/* ── メインカラム ── */}
           <div className="lg:col-span-2 space-y-6">
+            {/* 本日の注目ポイント */}
+            {highlights.length > 0 && (
+              <Section title="本日の注目ポイント" icon="💡">
+                <div className="space-y-2">
+                  {highlights.map((h, i) => (
+                    <div
+                      key={i}
+                      className={`flex gap-3 rounded-lg p-3 text-sm ${
+                        h.type === "conflict"
+                          ? "bg-red-50/60 border border-red-100"
+                          : "bg-amber-50/60 border border-amber-100"
+                      }`}
+                    >
+                      <span className="shrink-0 mt-0.5">
+                        {h.type === "conflict" ? "⚖️" : "🔍"}
+                      </span>
+                      <div>
+                        <p className="text-slate-700 leading-relaxed">
+                          {h.text}
+                        </p>
+                        <p className="text-xs text-slate-400 mt-1">
+                          {h.meeting}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </Section>
+            )}
+
             {/* 本日のキートピック */}
             {topTopics.length > 0 && (
               <Section title="本日の主要トピック" icon="🏷">
@@ -158,12 +245,16 @@ export default async function HomePage() {
                 <div className="card">
                   <ul className="space-y-2">
                     {agreements.map((a, i) => (
-                      <li key={i} className="text-sm">
-                        <span className="text-green-600 font-medium mr-2">▸</span>
-                        {a.text}
-                        <span className="text-xs text-slate-400 ml-2">
-                          [{a.meeting}]
+                      <li key={i} className="text-sm flex gap-2">
+                        <span className="text-green-500 font-medium shrink-0 mt-0.5">
+                          ▸
                         </span>
+                        <div>
+                          <span className="text-slate-700">{a.text}</span>
+                          <span className="text-xs text-slate-400 ml-2">
+                            [{a.meeting}]
+                          </span>
+                        </div>
                       </li>
                     ))}
                   </ul>
@@ -189,49 +280,65 @@ export default async function HomePage() {
             </Section>
           </div>
 
-          {/* サイドバー */}
+          {/* ── サイドバー ── */}
           <aside className="space-y-4">
-            <div className="card">
-              <p className="font-semibold text-slate-700 mb-3">📊 本日の統計</p>
-              <dl className="space-y-2 text-sm">
-                <div className="flex justify-between">
-                  <dt className="text-slate-500">審議件数</dt>
-                  <dd className="font-medium">{meetings.length} 件</dd>
-                </div>
-                <div className="flex justify-between">
-                  <dt className="text-slate-500">要約済み</dt>
-                  <dd className="font-medium">{meetingsWithSummary.length} 件</dd>
-                </div>
-                <div className="flex justify-between">
-                  <dt className="text-slate-500">総発言数</dt>
-                  <dd className="font-medium">
-                    {meetings.reduce((s, m) => s + m._count.speeches, 0).toLocaleString()} 発言
-                  </dd>
-                </div>
-              </dl>
-            </div>
-
             <div className="card">
               <p className="font-semibold text-slate-700 mb-2">⚠️ ご注意</p>
               <p className="text-xs text-slate-500 leading-relaxed">
-              本サイトはAIによる自動要約サイトです。より正確な国会の内容を確認したい場合は、一次情報（<a href="https://kokkai.ndl.go.jp/" target="_blank" rel="noopener noreferrer" className="underline hover:text-slate-600">国立国会図書館</a>）をご確認ください。
+                本サイトはAIによる自動要約サイトです。より正確な国会の内容を確認したい場合は、一次情報（
+                <a
+                  href="https://kokkai.ndl.go.jp/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="underline hover:text-slate-600"
+                >
+                  国立国会図書館
+                </a>
+                ）をご確認ください。
               </p>
             </div>
 
             <div className="card">
-              <p className="font-semibold text-slate-700 mb-2">🏛 院別</p>
-              <div className="space-y-1">
+              <p className="font-semibold text-slate-700 mb-3">🏛 院別の内訳</p>
+              <div className="space-y-2">
                 {["衆議院", "参議院"].map((house) => {
-                  const count = meetings.filter((m) => m.house === house).length;
+                  const count = meetings.filter(
+                    (m) => m.house === house
+                  ).length;
+                  const pct =
+                    meetings.length > 0
+                      ? Math.round((count / meetings.length) * 100)
+                      : 0;
                   return (
-                    <div key={house} className="flex justify-between text-sm">
-                      <HouseBadge house={house} />
-                      <span className="text-slate-500">{count} 件</span>
+                    <div key={house}>
+                      <div className="flex justify-between text-sm mb-1">
+                        <HouseBadge house={house} />
+                        <span className="text-slate-500">{count} 件</span>
+                      </div>
+                      {/* プログレスバー */}
+                      <div className="h-1.5 rounded-full bg-slate-100 overflow-hidden">
+                        <div
+                          className={`h-full rounded-full ${
+                            house === "衆議院" ? "bg-blue-400" : "bg-green-400"
+                          }`}
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
                     </div>
                   );
                 })}
               </div>
             </div>
+
+            {/* 全件を見る導線 */}
+            <a
+              href="/meetings"
+              className="block card text-center hover:border-blue-300"
+            >
+              <p className="text-sm font-medium text-blue-600">
+                📚 過去の会議一覧を見る →
+              </p>
+            </a>
           </aside>
         </div>
       </div>

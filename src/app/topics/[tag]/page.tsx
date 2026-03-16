@@ -1,4 +1,3 @@
-// src/app/topics/[tag]/page.tsx
 import type { Metadata } from "next";
 import { prisma } from "@/lib/prisma";
 import { SummaryCard, NoData } from "@/components/ui";
@@ -21,7 +20,6 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 export default async function TopicPage({ params }: Props) {
   const tag = decodeURIComponent(params.tag);
 
-  // keyTopics 配列に tag が含まれる Summary を持つ Meeting を取得
   const summaries = await prisma.summary.findMany({
     where: {
       keyTopics: { has: tag },
@@ -40,7 +38,7 @@ export default async function TopicPage({ params }: Props) {
     summary: { bullets: s.bullets, keyTopics: s.keyTopics },
   }));
 
-  // 関連タグ (同じ会議に出てくる他タグ)
+  // 関連タグ
   const relatedTagCounts = new Map<string, number>();
   for (const s of summaries) {
     for (const t of s.keyTopics) {
@@ -58,8 +56,11 @@ export default async function TopicPage({ params }: Props) {
     <div className="max-w-5xl mx-auto px-4 py-8">
       {/* パンくず */}
       <nav className="text-sm text-slate-400 mb-4">
-        <Link href="/" className="hover:text-slate-600">ホーム</Link> /{" "}
-        <span>#{tag}</span>
+        <Link href="/" className="hover:text-slate-600 transition">
+          ホーム
+        </Link>{" "}
+        /{" "}
+        <span className="text-slate-600">#{tag}</span>
       </nav>
 
       <h1 className="text-2xl font-bold text-slate-900 mb-2">
@@ -72,14 +73,16 @@ export default async function TopicPage({ params }: Props) {
 
       {/* 関連タグ */}
       {relatedTags.length > 0 && (
-        <div className="mb-6">
-          <p className="text-xs text-slate-400 mb-2">関連トピック</p>
+        <div className="mb-8">
+          <p className="text-xs text-slate-400 mb-2 font-medium">
+            関連トピック
+          </p>
           <div className="flex flex-wrap gap-2">
             {relatedTags.map((t) => (
               <Link
                 key={t}
                 href={`/topics/${encodeURIComponent(t)}`}
-                className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs text-slate-600 hover:bg-slate-200 transition"
+                className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600 hover:bg-blue-50 hover:text-blue-700 transition-colors"
               >
                 #{t}
               </Link>
@@ -89,7 +92,9 @@ export default async function TopicPage({ params }: Props) {
       )}
 
       {meetings.length === 0 ? (
-        <NoData message={`「${tag}」に関する会議が見つかりませんでした。`} />
+        <NoData
+          message={`「${tag}」に関する会議が見つかりませんでした。`}
+        />
       ) : (
         <div className="grid gap-4 sm:grid-cols-2">
           {meetings.map((m) => (
