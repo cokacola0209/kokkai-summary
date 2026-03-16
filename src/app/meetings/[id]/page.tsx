@@ -216,7 +216,7 @@ function getBeginnerThemeGuide(keyTopics: string[]): BeginnerGuideContent | null
     },
     {
       label: "医療",
-      keywords: ["医療", "介護", "保険", "病院", "診療", "薬価", "感染症"],
+      keywords: ["医療", "介護", "保険", "病院", "診療", "薬価", "感染症", "高額療養費"],
       content: {
         label: "医療",
         summary:
@@ -500,6 +500,7 @@ interface SpeakerSummary {
   quotes: string[];
 }
 
+/** フル表示カード（上位4名用） */
 function SpeakerCard({ s }: { s: SpeakerSummary }) {
   return (
     <div className="card">
@@ -526,6 +527,53 @@ function SpeakerCard({ s }: { s: SpeakerSummary }) {
         </div>
       )}
     </div>
+  );
+}
+
+/** 折りたたみカード（5名目以降用） */
+function CollapsedSpeakerCard({ s }: { s: SpeakerSummary }) {
+  const summaryPreview = shortenText(s.summary, 50);
+
+  return (
+    <details className="overflow-hidden rounded-2xl border border-slate-200 bg-white transition-all">
+      <summary className="flex cursor-pointer list-none items-center gap-3 px-4 py-3">
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-100 text-sm">
+          👤
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <p className="text-sm font-semibold text-slate-800">{s.speaker}</p>
+            {s.group && (
+              <span className="text-xs text-slate-400">{s.group}</span>
+            )}
+          </div>
+          <p className="mt-0.5 truncate text-xs text-slate-500">
+            {summaryPreview}
+          </p>
+        </div>
+        <span className="shrink-0 text-xs font-medium text-blue-600">
+          詳しく
+        </span>
+      </summary>
+
+      <div className="border-t border-slate-100 px-4 pb-4 pt-3">
+        <p className="mb-2 text-sm leading-relaxed text-slate-700">
+          {s.summary}
+        </p>
+        {s.quotes.length > 0 && (
+          <div className="space-y-1.5">
+            {s.quotes.map((q, i) => (
+              <blockquote
+                key={i}
+                className="border-l-4 border-slate-200 pl-3 text-xs italic leading-relaxed text-slate-500"
+              >
+                「{q}」
+              </blockquote>
+            ))}
+          </div>
+        )}
+      </div>
+    </details>
   );
 }
 
@@ -750,6 +798,11 @@ export default async function MeetingDetailPage({
   const speakerSummaries =
     (summary?.speakerSummaries as SpeakerSummary[] | null) ?? [];
 
+  // ── 上位4名（2列×2行）はフル表示、残りは折りたたみ ──
+  const FULL_DISPLAY_COUNT = 4;
+  const fullSpeakers = speakerSummaries.slice(0, FULL_DISPLAY_COUNT);
+  const collapsedSpeakers = speakerSummaries.slice(FULL_DISPLAY_COUNT);
+
   const dateStr = meeting.date.toLocaleDateString("ja-JP", {
     year: "numeric",
     month: "long",
@@ -849,7 +902,7 @@ export default async function MeetingDetailPage({
               <>
                 {/* キートピック */}
                 {summary.keyTopics.length > 0 && (
-                  <Section title="キートピック" icon="🏷">
+                  <Section title="主なテーマ" icon="🏷">
                     <div className="flex flex-wrap gap-2">
                       {summary.keyTopics.map((t) => (
                         <TopicTag key={t} tag={t} />
@@ -875,15 +928,15 @@ export default async function MeetingDetailPage({
     </div>
   </Section>
 
-  {/* 合意事項 */}
-  <Section title="合意・採決事項" icon="✅">
+  {/* 決まったこと */}
+  <Section title="決まったこと" icon="✅">
     <div className="card">
       <BulletList items={summary.agreementPoints} color="green" />
     </div>
   </Section>
 
-  {/* 対立点 */}
-  <Section title="対立点・未解決事項" icon="⚖️">
+  {/* 意見が分かれた点 */}
+  <Section title="意見が分かれた点" icon="⚖️">
     <div className="card">
       <BulletList items={summary.conflictPoints} color="red" />
     </div>
@@ -907,17 +960,32 @@ export default async function MeetingDetailPage({
 </>
             )}
 
-            {/* 発言者ごとの要点 */}
+            {/* ── 発言者ごとの要点 ── */}
             {speakerSummaries.length > 0 && (
               <Section
                 title={`発言者ごとの要点（${speakerSummaries.length}名）`}
                 icon="👥"
               >
+                {/* 上位4名: フル表示 */}
                 <div className="grid gap-3 sm:grid-cols-2">
-                  {speakerSummaries.map((s, i) => (
+                  {fullSpeakers.map((s, i) => (
                     <SpeakerCard key={i} s={s} />
                   ))}
                 </div>
+
+                {/* 5名目以降: 折りたたみ表示 */}
+                {collapsedSpeakers.length > 0 && (
+                  <div className="mt-4">
+                    <p className="mb-3 text-xs font-medium text-slate-400">
+                      その他の発言者（{collapsedSpeakers.length}名） — タップで詳細を表示
+                    </p>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      {collapsedSpeakers.map((s, i) => (
+                        <CollapsedSpeakerCard key={i} s={s} />
+                      ))}
+                    </div>
+                  </div>
+                )}
               </Section>
             )}
 
