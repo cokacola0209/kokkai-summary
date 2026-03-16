@@ -136,10 +136,11 @@ function extractPeopleKeywords(
     ];
 
     for (const text of texts) {
-      for (const match of text.matchAll(PERSON_PATTERN)) {
-        const name = match[0];
+      const matches = text.match(PERSON_PATTERN) ?? [];
+
+      matches.forEach((name) => {
         counts.set(name, (counts.get(name) ?? 0) + 1);
-      }
+      });
     }
   }
 
