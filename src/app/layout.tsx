@@ -14,7 +14,7 @@ export const metadata: Metadata = {
     template: "%s | 国会ラボ",
   },
   description:
-    "国立国会図書館の会議録検索システムを汻用し、毎日の国会審議をAIが構造化要約します。根拨・影響・未解決点を明示。",
+    "国立国会図書館の会議録検索システムを活用し、毎日の国会審議をAIが構造化要約します。根拠・影響・未解決点を明示。",
   openGraph: {
     type: "website",
     locale: "ja_JP",
@@ -34,16 +34,17 @@ export default function RootLayout({
         <NavBar />
         <main className="min-h-screen bg-slate-50">{children}</main>
         <footer className="border-t bg-white py-8 text-center text-sm text-slate-500">
-          <div className="max-w-5xl mx-auto px-4">
+          <div className="mx-auto max-w-5xl px-4">
             <p>
-              データ出具:{" "}
+              データ出典:{" "}
               <a
                 href="https://kokkai.ndl.go.jp/"
                 className="underline hover:text-slate-700"
                 target="_blank"
                 rel="noopener noreferrer"
               >
-                国朋国会囸書館 国会会議録検索システム              </a>
+                国立国会図書館 国会会議録検索システム
+              </a>
             </p>
             <p className="mt-1">
               要約はAIが自動生成。原文は各リンクよりご確認ください。
