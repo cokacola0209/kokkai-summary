@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 
 export const metadata: Metadata = {
   title: "人物一覧 | 国会ラボ",
-  description: "会議に出てくる人物を一覧で見られます。",
+  description: "会議に出てきた人物を一覧で見られます。",
 };
 
 export const revalidate = 3600;
@@ -71,6 +71,7 @@ async function getPeopleIndex() {
       name,
       count,
     }));
+}
 
 export default async function PeoplePage() {
   const people = await getPeopleIndex();
