@@ -181,7 +181,7 @@
      await prisma.fetchLog.create({
        data: {
          date: new Date(targetDate),
-         status: result.status === "no_data" ? "success" : result.status,
+         status: (result.status as string) === "no_data" ? "success" : result.status,
          fetched: result.fetched,
          errors: result.errors,
        },
