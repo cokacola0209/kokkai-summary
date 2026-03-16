@@ -143,9 +143,9 @@ async function getFilterOptions() {
         .filter(isUsefulSpeakerName)
     );
 
-    for (const speaker of speakers) {
+    speakers.forEach((speaker) => {
       personCounts.set(speaker, (personCounts.get(speaker) ?? 0) + 1);
-    }
+    });
   }
 
   const topicOptions = Array.from(topicCounts.entries())

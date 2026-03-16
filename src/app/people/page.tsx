@@ -54,15 +54,15 @@ async function getPeopleIndex() {
   const counts = new Map<string, number>();
 
   for (const meeting of meetings) {
-    const speakers = new Set(
+    const speakers = new Set<string>(
       meeting.speeches
         .map((speech) => normalizeSpeakerName(speech.speaker))
         .filter(isUsefulSpeakerName)
     );
 
-    for (const speaker of speakers) {
+    speakers.forEach((speaker) => {
       counts.set(speaker, (counts.get(speaker) ?? 0) + 1);
-    }
+    });
   }
 
   return Array.from(counts.entries())
@@ -71,7 +71,6 @@ async function getPeopleIndex() {
       name,
       count,
     }));
-}
 
 export default async function PeoplePage() {
   const people = await getPeopleIndex();
