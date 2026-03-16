@@ -21,8 +21,47 @@ const CATEGORY_KEYWORDS: Record<string, string[]> = {
   政治改革: ["政治改革", "政治資金", "献金", "選挙", "裏金", "改革"],
 };
 
+// ── 改善: 複合肩書き（副大臣・国務大臣 等）を先にマッチさせる ──
 const PERSON_PATTERN =
-  /([一-龯々]{1,4})(首相|総理|大臣|議員|委員長|参考人|長官|知事|市長|大統領|幹事長)/g;
+  /([一-龯ぁ-んァ-ヶー々]{2,6}?)(?:副大臣|国務大臣|環境大臣|農林水産大臣|文部科学大臣|厚生労働大臣|経済産業大臣|国土交通大臣|防衛大臣|総務大臣|法務大臣|財務大臣|外務大臣|首相|総理大臣|総理|大臣|議員|委員長|参考人|長官|知事|市長|大統領|幹事長)/g;
+
+// ── 追加: 抽出された人物キーワードのバリデーション ──
+function isValidPersonKeyword(fullMatch: string): boolean {
+  // 肩書き部分を取り除いて「名前」だけ取得
+  const titleSuffixes = [
+    "副大臣", "国務大臣", "環境大臣", "農林水産大臣", "文部科学大臣",
+    "厚生労働大臣", "経済産業大臣", "国土交通大臣", "防衛大臣", "総務大臣",
+    "法務大臣", "財務大臣", "外務大臣", "首相", "総理大臣", "総理",
+    "大臣", "議員", "委員長", "参考人", "長官", "知事", "市長", "大統領", "幹事長",
+  ];
+
+  let nameOnly = fullMatch;
+  for (const suffix of titleSuffixes) {
+    if (nameOnly.endsWith(suffix)) {
+      nameOnly = nameOnly.slice(0, -suffix.length);
+      break;
+    }
+  }
+
+  // 名前部分が2文字未満 → 無効（例: "子大臣"）
+  if (nameOnly.length < 2) return false;
+
+  // 「対」で始まる → 無効（例: "対石破茂総理"）
+  if (nameOnly.startsWith("対")) return false;
+
+  // 省庁・組織名が混入 → 無効（例: "国土交通大臣", "自民党議員"）
+  const nonNameWords = [
+    "環境", "国土", "交通", "農林", "水産", "文部", "科学",
+    "厚生", "労働", "経済", "産業", "国務", "内閣", "防衛",
+    "総務", "法務", "財務", "外務", "デジタル",
+    "自民党", "立憲", "公明党", "公明", "維新", "共産党", "共産",
+    "れいわ", "国民民主",
+    "政務官", "事務局", "参考人",
+  ];
+  if (nonNameWords.some((word) => nameOnly.includes(word))) return false;
+
+  return true;
+}
 
 export async function generateMetadata(): Promise<Metadata> {
   const latestDate = await prisma.meeting.findFirst({
@@ -139,7 +178,10 @@ function extractPeopleKeywords(
       const matches = text.match(PERSON_PATTERN) ?? [];
 
       matches.forEach((name) => {
-        counts.set(name, (counts.get(name) ?? 0) + 1);
+        // ── 追加: バリデーションを通ったものだけカウント ──
+        if (isValidPersonKeyword(name)) {
+          counts.set(name, (counts.get(name) ?? 0) + 1);
+        }
       });
     }
   }
@@ -394,7 +436,7 @@ const topAgreementItems = agreements.slice(0, 4);
       👤 人物キーワード
     </p>
     <Link
-      href="/meetings"
+      href="/people"
       className="text-xs text-slate-400 hover:text-slate-600"
     >
       一覧へ

@@ -86,6 +86,7 @@ function isUsefulSpeakerName(name: string): boolean {
   if (!name) return false;
   if (name.length > 20) return false;
 
+  // ── 改善: 「会議録情報」等の非人名を除外 ──
   const blocked = new Set([
     "委員長",
     "理事",
@@ -97,6 +98,7 @@ function isUsefulSpeakerName(name: string): boolean {
     "公述人",
     "説明員",
     "事務局",
+    "会議録情報",
   ]);
 
   return !blocked.has(name);
@@ -250,7 +252,6 @@ export default async function MeetingsPage({
     getFilterOptions(),
   ]);
 
-　
   const activeFilterCount = [house, topic, person, committee].filter(Boolean).length;
   const hasActiveFilters = activeFilterCount > 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
