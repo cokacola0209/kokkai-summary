@@ -131,9 +131,9 @@ async function getPartyBalance() {
     }>;
   }> = [];
 
-  for (const [house, houseSeats] of byHouse) {
+  for (const [house, houseSeats] of Array.from(byHouse)) {
     const latestAsOf = houseSeats.reduce(
-      (max, s) => (s.asOf > max ? s.asOf : max),
+      (max, s) => (s.asOf.getTime() > max.getTime() ? s.asOf : max),
       houseSeats[0].asOf
     );
 
