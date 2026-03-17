@@ -9,67 +9,30 @@ export const metadata: Metadata = {
 
 export const revalidate = 3600;
 
-function normalizeSpeakerName(name: string): string {
-  return name
-    .replace(/\s+/g, " ")
-    .replace(/君$/g, "")
-    .replace(/議員$/g, "")
-    .replace(/委員長$/g, "")
-    .replace(/委員$/g, "")
-    .replace(/参考人$/g, "")
-    .trim();
-}
-
-function isUsefulSpeakerName(name: string): boolean {
-  if (!name) return false;
-  if (name.length < 2) return false;
-
-  const blocked = [
-    "会議録情報",
-    "議事日程",
-    "発言者",
-    "委員会",
-    "本会議",
-    "理事会",
-  ];
-
-  return !blocked.some((word) => name.includes(word));
-}
-
 async function getPeopleIndex() {
-  const meetings = await prisma.meeting.findMany({
-    orderBy: { date: "desc" },
-    take: 160,
+  // Person テーブルから直接取得（バックフィル済み）
+  const persons = await prisma.person.findMany({
     include: {
-      speeches: {
+      party: {
         select: {
-          speaker: true,
+          shortName: true,
+          color: true,
         },
-        orderBy: { order: "asc" },
-        take: 20,
+      },
+      _count: {
+        select: { speeches: true },
       },
     },
   });
 
-  const counts = new Map<string, number>();
-
-  for (const meeting of meetings) {
-    const speakers = new Set<string>(
-      meeting.speeches
-        .map((speech) => normalizeSpeakerName(speech.speaker))
-        .filter(isUsefulSpeakerName)
-    );
-
-    speakers.forEach((speaker) => {
-      counts.set(speaker, (counts.get(speaker) ?? 0) + 1);
-    });
-  }
-
-  return Array.from(counts.entries())
-    .sort((a, b) => a[0].localeCompare(b[0], "ja"))
-    .map(([name, count]) => ({
-      name,
-      count,
+  return persons
+    .filter((p) => p._count.speeches > 0)
+    .sort((a, b) => a.name.localeCompare(b.name, "ja"))
+    .map((p) => ({
+      name: p.name,
+      count: p._count.speeches,
+      partyShortName: p.party?.shortName ?? null,
+      partyColor: p.party?.color ?? null,
     }));
 }
 
@@ -92,14 +55,14 @@ export default async function PeoplePage() {
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-slate-900">人物一覧</h1>
         <p className="mt-2 text-sm text-slate-500">
-          最近の会議に出てきた人物を、見やすく一覧にしています。
+          最近の会議に出てきた人物を、所属会派つきで一覧にしています。
         </p>
       </div>
 
       <div className="rounded-2xl border border-slate-200 bg-white p-5">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <p className="text-sm font-medium text-slate-700">
-            あいうえお順で見られます
+            あいうえお順 · 会派バッジつき
           </p>
           <Link
             href="/meetings"
@@ -115,10 +78,22 @@ export default async function PeoplePage() {
               <Link
                 key={person.name}
                 href={`/meetings?person=${encodeURIComponent(person.name)}`}
-                className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs text-slate-600 transition-colors hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
+                className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs text-slate-600 transition-colors hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
               >
+                {person.partyColor && (
+                  <span
+                    className="inline-block h-2 w-2 shrink-0 rounded-full"
+                    style={{ backgroundColor: person.partyColor }}
+                    title={person.partyShortName ?? ""}
+                  />
+                )}
                 <span>{person.name}</span>
-                <span className="text-slate-400">({person.count})</span>
+                {person.partyShortName && (
+                  <span className="text-slate-400">
+                    {person.partyShortName}
+                  </span>
+                )}
+                <span className="text-slate-300">({person.count})</span>
               </Link>
             ))}
           </div>

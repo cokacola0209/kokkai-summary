@@ -21,13 +21,10 @@ const CATEGORY_KEYWORDS: Record<string, string[]> = {
   政治改革: ["政治改革", "政治資金", "献金", "選挙", "裏金", "改革"],
 };
 
-// ── 改善: 複合肩書き（副大臣・国務大臣 等）を先にマッチさせる ──
 const PERSON_PATTERN =
   /([一-龯ぁ-んァ-ヶー々]{2,6}?)(?:副大臣|国務大臣|環境大臣|農林水産大臣|文部科学大臣|厚生労働大臣|経済産業大臣|国土交通大臣|防衛大臣|総務大臣|法務大臣|財務大臣|外務大臣|首相|総理大臣|総理|大臣|議員|委員長|参考人|長官|知事|市長|大統領|幹事長)/g;
 
-// ── 追加: 抽出された人物キーワードのバリデーション ──
 function isValidPersonKeyword(fullMatch: string): boolean {
-  // 肩書き部分を取り除いて「名前」だけ取得
   const titleSuffixes = [
     "副大臣", "国務大臣", "環境大臣", "農林水産大臣", "文部科学大臣",
     "厚生労働大臣", "経済産業大臣", "国土交通大臣", "防衛大臣", "総務大臣",
@@ -43,13 +40,9 @@ function isValidPersonKeyword(fullMatch: string): boolean {
     }
   }
 
-  // 名前部分が2文字未満 → 無効（例: "子大臣"）
   if (nameOnly.length < 2) return false;
-
-  // 「対」で始まる → 無効（例: "対石破茂総理"）
   if (nameOnly.startsWith("対")) return false;
 
-  // 省庁・組織名が混入 → 無効（例: "国土交通大臣", "自民党議員"）
   const nonNameWords = [
     "環境", "国土", "交通", "農林", "水産", "文部", "科学",
     "厚生", "労働", "経済", "産業", "国務", "内閣", "防衛",
@@ -101,6 +94,71 @@ async function getLatestMeetings() {
   });
 
   return { meetings, date: latest.date };
+}
+
+// ── 勢力図データ取得 ──
+async function getPartyBalance() {
+  const seats = await prisma.partySeat.findMany({
+    orderBy: [{ house: "asc" }, { seats: "desc" }],
+    include: {
+      party: {
+        select: {
+          shortName: true,
+          color: true,
+        },
+      },
+    },
+  });
+
+  // 院ごとにグループ化し、最新 asOf のデータだけ使う
+  const byHouse = new Map<string, typeof seats>();
+  for (const s of seats) {
+    if (!byHouse.has(s.house)) {
+      byHouse.set(s.house, []);
+    }
+    byHouse.get(s.house)!.push(s);
+  }
+
+  const result: Array<{
+    house: string;
+    totalSeats: number;
+    majority: number;
+    parties: Array<{
+      shortName: string;
+      color: string;
+      seats: number;
+      pct: number;
+    }>;
+  }> = [];
+
+  for (const [house, houseSeats] of byHouse) {
+    const latestAsOf = houseSeats.reduce(
+      (max, s) => (s.asOf > max ? s.asOf : max),
+      houseSeats[0].asOf
+    );
+
+    const latestSeats = houseSeats
+      .filter((s) => s.asOf.getTime() === latestAsOf.getTime())
+      .sort((a, b) => b.seats - a.seats);
+
+    const totalSeats = house === "衆議院" ? 465 : 248;
+    const majority = Math.floor(totalSeats / 2) + 1;
+
+    result.push({
+      house,
+      totalSeats,
+      majority,
+      parties: latestSeats.map((s) => ({
+        shortName: s.party.shortName,
+        color: s.party.color,
+        seats: s.seats,
+        pct: Math.round((s.seats / totalSeats) * 100),
+      })),
+    });
+  }
+
+  result.sort((a, b) => (a.house === "衆議院" ? -1 : 1));
+  return result;
 }
 
 function aggregateTopics(
@@ -176,9 +234,7 @@ function extractPeopleKeywords(
 
     for (const text of texts) {
       const matches = text.match(PERSON_PATTERN) ?? [];
-
       matches.forEach((name) => {
-        // ── 追加: バリデーションを通ったものだけカウント ──
         if (isValidPersonKeyword(name)) {
           counts.set(name, (counts.get(name) ?? 0) + 1);
         }
@@ -190,23 +246,18 @@ function extractPeopleKeywords(
     .sort((a, b) => {
       const aPriority = PRIORITY_PEOPLE.indexOf(a[0]);
       const bPriority = PRIORITY_PEOPLE.indexOf(b[0]);
-
       const aIsPriority = aPriority !== -1;
       const bIsPriority = bPriority !== -1;
-
       if (aIsPriority && bIsPriority) return aPriority - bPriority;
       if (aIsPriority) return -1;
       if (bIsPriority) return 1;
-
       if (b[1] !== a[1]) return b[1] - a[1];
-
       return a[0].localeCompare(b[0], "ja");
     })
     .slice(0, 24)
     .map(([name]) => name);
 }
 
-// ── 全会議からトピックを取得（分野リンクのフォールバック用） ──
 async function getRecentTopics(): Promise<string[]> {
   const meetings = await prisma.meeting.findMany({
     orderBy: { date: "desc" },
@@ -232,7 +283,6 @@ async function getRecentTopics(): Promise<string[]> {
 
 function buildCategoryLinks(todayTopics: string[], allTopics: string[]) {
   return Object.entries(CATEGORY_KEYWORDS).map(([label, keywords]) => {
-    // まず今日のトピックから探す
     const todayMatch =
       todayTopics.find((topic) =>
         keywords.some(
@@ -248,7 +298,6 @@ function buildCategoryLinks(todayTopics: string[], allTopics: string[]) {
       };
     }
 
-    // 今日になければ、全会議のトピックからフォールバック
     const broadMatch =
       allTopics.find((topic) =>
         keywords.some(
@@ -290,6 +339,84 @@ function NewsArticleJsonLd({
   );
 }
 
+// ── 勢力図コンポーネント ──
+function PartyBalanceChart({
+  balanceData,
+}: {
+  balanceData: Awaited<ReturnType<typeof getPartyBalance>>;
+}) {
+  if (balanceData.length === 0) return null;
+
+  return (
+    <div className="card">
+      <p className="mb-1 font-semibold text-slate-700">🏛 国会の勢力図</p>
+      <p className="mb-4 text-xs text-slate-400">
+        各会派の議席数（過半数ラインつき）
+      </p>
+
+      <div className="space-y-5">
+        {balanceData.map((house) => (
+          <div key={house.house}>
+            <div className="mb-2 flex items-center justify-between">
+              <p className="text-sm font-medium text-slate-700">
+                {house.house}
+                <span className="ml-1 text-xs font-normal text-slate-400">
+                  （定数{house.totalSeats}）
+                </span>
+              </p>
+              <span className="text-xs text-slate-400">
+                過半数 {house.majority}
+              </span>
+            </div>
+
+            {/* 議席バー */}
+            <div className="relative mb-2">
+              <div className="flex h-5 overflow-hidden rounded-full bg-slate-100">
+                {house.parties.map((p, i) => (
+                  <div
+                    key={i}
+                    className="transition-all duration-300"
+                    style={{
+                      width: `${(p.seats / house.totalSeats) * 100}%`,
+                      backgroundColor: p.color,
+                    }}
+                    title={`${p.shortName}: ${p.seats}席（${p.pct}%）`}
+                  />
+                ))}
+              </div>
+
+              {/* 過半数ライン */}
+              <div
+                className="absolute top-0 h-5 border-r-2 border-dashed border-slate-900/30"
+                style={{
+                  left: `${(house.majority / house.totalSeats) * 100}%`,
+                }}
+              />
+            </div>
+
+            {/* 凡例 */}
+            <div className="flex flex-wrap gap-x-3 gap-y-1">
+              {house.parties.map((p, i) => (
+                <span
+                  key={i}
+                  className="flex items-center gap-1 text-[11px] text-slate-600"
+                >
+                  <span
+                    className="inline-block h-2 w-2 rounded-full"
+                    style={{ backgroundColor: p.color }}
+                  />
+                  {p.shortName}
+                  <span className="text-slate-400">{p.seats}</span>
+                </span>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default async function HomePage() {
   const { meetings, date } = await getLatestMeetings();
 
@@ -309,19 +436,21 @@ export default async function HomePage() {
   });
 
   const topTopics = aggregateTopics(meetings);
-const agreements = aggregateAgreements(meetings);
-const highlights = aggregateHighlights(meetings);
-const peopleKeywords = extractPeopleKeywords(meetings);
+  const agreements = aggregateAgreements(meetings);
+  const highlights = aggregateHighlights(meetings);
+  const peopleKeywords = extractPeopleKeywords(meetings);
 
-const allTopics = await getRecentTopics();
-const categoryLinks = buildCategoryLinks(topTopics, allTopics);
-const spotlightMeetings = meetings.slice(0, 3);
+  const allTopics = await getRecentTopics();
+  const categoryLinks = buildCategoryLinks(topTopics, allTopics);
+  const spotlightMeetings = meetings.slice(0, 3);
 
-const topHighlightItems = highlights.slice(0, 3);
-const topAgreementItems = agreements.slice(0, 4);
+  const topHighlightItems = highlights.slice(0, 3);
+  const topAgreementItems = agreements.slice(0, 4);
 
   const meetingsWithSummary = meetings.filter((m) => m.summary);
   const totalSpeeches = meetings.reduce((s, m) => s + m._count.speeches, 0);
+
+  const partyBalance = await getPartyBalance();
 
   return (
     <>
@@ -635,6 +764,9 @@ const topAgreementItems = agreements.slice(0, 4);
                 ）をご確認ください。
               </p>
             </div>
+
+            {/* ── 勢力図 ── */}
+            <PartyBalanceChart balanceData={partyBalance} />
 
             <div className="card">
               <p className="mb-3 font-semibold text-slate-700">🏛 院別の内訳</p>
