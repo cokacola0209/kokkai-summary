@@ -206,10 +206,51 @@ function extractPeopleKeywords(
     .map(([name]) => name);
 }
 
-function buildCategoryLinks(topics: string[]) {
+// ── 全会議からトピックを取得（分野リンクのフォールバック用） ──
+async function getRecentTopics(): Promise<string[]> {
+  const meetings = await prisma.meeting.findMany({
+    orderBy: { date: "desc" },
+    take: 100,
+    include: {
+      summary: {
+        select: { keyTopics: true },
+      },
+    },
+  });
+
+  const counts = new Map<string, number>();
+  for (const m of meetings) {
+    for (const t of m.summary?.keyTopics ?? []) {
+      counts.set(t, (counts.get(t) ?? 0) + 1);
+    }
+  }
+
+  return Array.from(counts.entries())
+    .sort((a, b) => b[1] - a[1])
+    .map(([t]) => t);
+}
+
+function buildCategoryLinks(todayTopics: string[], allTopics: string[]) {
   return Object.entries(CATEGORY_KEYWORDS).map(([label, keywords]) => {
-    const matchedTopic =
-      topics.find((topic) =>
+    // まず今日のトピックから探す
+    const todayMatch =
+      todayTopics.find((topic) =>
+        keywords.some(
+          (keyword) => topic.includes(keyword) || keyword.includes(topic)
+        )
+      ) ?? null;
+
+    if (todayMatch) {
+      return {
+        label,
+        matchedTopic: todayMatch,
+        href: `/topics/${encodeURIComponent(todayMatch)}`,
+      };
+    }
+
+    // 今日になければ、全会議のトピックからフォールバック
+    const broadMatch =
+      allTopics.find((topic) =>
         keywords.some(
           (keyword) => topic.includes(keyword) || keyword.includes(topic)
         )
@@ -217,9 +258,9 @@ function buildCategoryLinks(topics: string[]) {
 
     return {
       label,
-      matchedTopic,
-      href: matchedTopic
-        ? `/topics/${encodeURIComponent(matchedTopic)}`
+      matchedTopic: broadMatch,
+      href: broadMatch
+        ? `/topics/${encodeURIComponent(broadMatch)}`
         : "/meetings",
     };
   });
@@ -272,7 +313,8 @@ const agreements = aggregateAgreements(meetings);
 const highlights = aggregateHighlights(meetings);
 const peopleKeywords = extractPeopleKeywords(meetings);
 
-const categoryLinks = buildCategoryLinks(topTopics);
+const allTopics = await getRecentTopics();
+const categoryLinks = buildCategoryLinks(topTopics, allTopics);
 const spotlightMeetings = meetings.slice(0, 3);
 
 const topHighlightItems = highlights.slice(0, 3);

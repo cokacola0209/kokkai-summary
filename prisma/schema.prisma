@@ -8,6 +8,10 @@ datasource db {
   directUrl = env("DIRECT_URL")
 }
 
+// ──────────────────────────────────────────
+// 既存テーブル
+// ──────────────────────────────────────────
+
 model Meeting {
   id            String   @id @default(cuid())
   ndlId         String   @unique
@@ -28,12 +32,22 @@ model Meeting {
 model Speech {
   id           String  @id @default(cuid())
   meetingId    String
-  speaker      String
-  speakerGroup String?
+  speaker      String            // raw値を保持
+  speakerGroup String?           // raw値を保持
   order        Int
   text         String
-  meeting      Meeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+
+  // ── 追加: 正規化リレーション（nullable → 段階的にバックフィル） ──
+  personId     String?
+  partyId      String?
+
+  meeting      Meeting  @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  person       Person?  @relation(fields: [personId], references: [id])
+  party        Party?   @relation(fields: [partyId], references: [id])
+
   @@index([meetingId])
+  @@index([personId])
+  @@index([partyId])
 }
 
 model Summary {
@@ -60,4 +74,57 @@ model FetchLog {
   errors    String[]
   createdAt DateTime @default(now())
   @@index([date])
+}
+
+// ──────────────────────────────────────────
+// 新規: 政党・会派
+// ──────────────────────────────────────────
+
+model Party {
+  id        String   @id @default(cuid())
+  name      String   @unique       // 正式名称 例: "自由民主党・無所属の会"
+  shortName String                 // 略称 例: "自民"
+  color     String   @default("#6b7280") // UI表示用カラーコード
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  speeches  Speech[]
+  persons   Person[]
+  seats     PartySeat[]
+}
+
+// ──────────────────────────────────────────
+// 新規: 議席数（院×会派ごと、時点管理）
+// ──────────────────────────────────────────
+
+model PartySeat {
+  id        String   @id @default(cuid())
+  partyId   String
+  house     String                 // "衆議院" | "参議院"
+  seats     Int                    // 議席数
+  asOf      DateTime @db.Date      // いつ時点の数字か
+  createdAt DateTime @default(now())
+
+  party     Party    @relation(fields: [partyId], references: [id], onDelete: Cascade)
+
+  @@unique([partyId, house, asOf])
+  @@index([house, asOf])
+}
+
+// ──────────────────────────────────────────
+// 新規: 人物
+// ──────────────────────────────────────────
+
+model Person {
+  id        String   @id @default(cuid())
+  name      String   @unique       // 正規化名 例: "石破茂"
+  aliases   String[]               // 表記ゆれ吸収 例: ["石破　茂", "石破茂君"]
+  partyId   String?                // 現在の所属（補助情報、履歴はSpeech.partyIdが正）
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  party     Party?   @relation(fields: [partyId], references: [id])
+  speeches  Speech[]
+
+  @@index([partyId])
 }

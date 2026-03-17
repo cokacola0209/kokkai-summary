@@ -3,7 +3,7 @@ import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 
 export const metadata: Metadata = {
-  title: "人物一覧 | 国会ラボ",
+  title: "人物一覧",
   description: "会議に出てきた人物を一覧で見られます。",
 };
 
