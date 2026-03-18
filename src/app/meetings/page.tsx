@@ -9,10 +9,10 @@ export const revalidate = 3600;
 export const metadata: Metadata = {
   title: "会議一覧",
   description:
-    "国会会議録の日付順一覧。テーマ・人物・委員会・院・会派で絞り込みながら要点を見やすく確認できます。",
+    "国会会議録の日付順一覧。テーマ・人物・委員会・院・会派・期間で絞り込みながら要点を見やすく確認できます。",
 };
 
-const PAGE_SIZE = 30;
+const PAGE_SIZE = 200;
 
 interface SearchParams {
   page?: string | string[];
@@ -21,6 +21,8 @@ interface SearchParams {
   person?: string | string[];
   committee?: string | string[];
   party?: string | string[];
+  year?: string | string[];
+  month?: string | string[];
 }
 
 function getSingleParam(value: string | string[] | undefined): string | undefined {
@@ -43,6 +45,8 @@ function buildMeetingsHref(params: {
   person?: string;
   committee?: string;
   party?: string;
+  year?: string;
+  month?: string;
   page?: string;
 }) {
   const qs = new URLSearchParams();
@@ -51,6 +55,8 @@ function buildMeetingsHref(params: {
   if (params.person) qs.set("person", params.person);
   if (params.committee) qs.set("committee", params.committee);
   if (params.party) qs.set("party", params.party);
+  if (params.year) qs.set("year", params.year);
+  if (params.month) qs.set("month", params.month);
   if (params.page) qs.set("page", params.page);
   const query = qs.toString();
   return query ? `/meetings?${query}` : "/meetings";
@@ -115,7 +121,6 @@ async function getFilterOptions() {
   const personOptions = Array.from(personCounts.entries()).sort((a, b) => b[1] - a[1]).slice(0, 12).map(([l]) => l);
   const committeeOptions = Array.from(committeeCounts.entries()).sort((a, b) => b[1] - a[1]).slice(0, 12).map(([l]) => l);
 
-  // ── 会派オプション ──
   const parties = await prisma.party.findMany({
     where: { speeches: { some: {} } },
     select: { id: true, shortName: true, color: true, _count: { select: { speeches: true } } },
@@ -129,6 +134,29 @@ async function getFilterOptions() {
   return { topicOptions, personOptions, committeeOptions, partyOptions };
 }
 
+async function getAvailableYearMonths() {
+  const result = await prisma.$queryRaw<{ year: number; month: number; count: bigint }[]>`
+    SELECT
+      EXTRACT(YEAR FROM date)::int AS year,
+      EXTRACT(MONTH FROM date)::int AS month,
+      COUNT(*)::bigint AS count
+    FROM "Meeting"
+    GROUP BY year, month
+    ORDER BY year DESC, month DESC
+  `;
+  const years = new Map<number, { months: { month: number; count: number }[]; total: number }>();
+  for (const row of result) {
+    if (!years.has(row.year)) {
+      years.set(row.year, { months: [], total: 0 });
+    }
+    const entry = years.get(row.year)!;
+    const cnt = Number(row.count);
+    entry.months.push({ month: row.month, count: cnt });
+    entry.total += cnt;
+  }
+  return years;
+}
+
 export default async function MeetingsPage({ searchParams }: { searchParams: SearchParams }) {
   const page = Math.max(1, Number(getSingleParam(searchParams.page) ?? 1));
   const house = getSingleParam(searchParams.house);
@@ -136,6 +164,30 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Sea
   const person = getSingleParam(searchParams.person);
   const committee = getSingleParam(searchParams.committee);
   const party = getSingleParam(searchParams.party);
+  const year = getSingleParam(searchParams.year);
+  const month = getSingleParam(searchParams.month);
+
+  // 期間フィルタの日付範囲を構築
+  let dateFilter: Prisma.MeetingWhereInput = {};
+  if (year) {
+    const y = Number(year);
+    if (month) {
+      const m = Number(month);
+      dateFilter = {
+        date: {
+          gte: new Date(y, m - 1, 1),
+          lt: new Date(m === 12 ? y + 1 : y, m === 12 ? 0 : m, 1),
+        },
+      };
+    } else {
+      dateFilter = {
+        date: {
+          gte: new Date(y, 0, 1),
+          lt: new Date(y + 1, 0, 1),
+        },
+      };
+    }
+  }
 
   const where: Prisma.MeetingWhereInput = {
     AND: [
@@ -148,10 +200,11 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Sea
           : { nameOfMeeting: { contains: committee, mode: "insensitive" } }
         : {},
       party ? { speeches: { some: { partyId: party } } } : {},
+      dateFilter,
     ],
   };
 
-  const [total, meetings, houses, filterOptions] = await Promise.all([
+  const [total, meetings, houses, filterOptions, yearMonths] = await Promise.all([
     prisma.meeting.count({ where }),
     prisma.meeting.findMany({
       where,
@@ -162,13 +215,14 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Sea
     }),
     prisma.meeting.groupBy({ by: ["house"], _count: true, orderBy: { _count: { house: "desc" } } }),
     getFilterOptions(),
+    getAvailableYearMonths(),
   ]);
 
   const activePartyLabel = party
     ? filterOptions.partyOptions.find((p) => p.id === party)?.shortName ?? "会派"
     : null;
 
-  const activeFilterCount = [house, topic, person, committee, party].filter(Boolean).length;
+  const activeFilterCount = [house, topic, person, committee, party, year].filter(Boolean).length;
   const hasActiveFilters = activeFilterCount > 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
@@ -179,6 +233,11 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Sea
     dateGroups.get(dateKey)!.push(m);
   }
   const dateEntries = Array.from(dateGroups.entries());
+
+  // 月ラベル
+  const monthLabel = month ? `${month}月` : null;
+  const yearLabel = year ? `${year}年` : null;
+  const periodLabel = yearLabel && monthLabel ? `${yearLabel}${monthLabel}` : yearLabel ?? null;
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-8">
@@ -198,7 +257,7 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Sea
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <p className="text-sm font-semibold text-slate-800">絞り込み</p>
-            <p className="mt-1 text-xs text-slate-500">院・会派・テーマ・人物・委員会で絞り込めます。</p>
+            <p className="mt-1 text-xs text-slate-500">院・会派・テーマ・人物・委員会・期間で絞り込めます。</p>
           </div>
           {hasActiveFilters && (
             <Link href="/meetings" className="inline-flex items-center rounded-full border border-slate-200 px-3 py-1 text-xs text-slate-600 hover:bg-slate-50">
@@ -209,11 +268,12 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Sea
 
         {hasActiveFilters && (
           <div className="mt-4 flex flex-wrap gap-2">
-            {house && <ActiveFilterChip label={`院: ${house}`} href={buildMeetingsHref({ topic, person, committee, party })} />}
-            {party && activePartyLabel && <ActiveFilterChip label={`会派: ${activePartyLabel}`} href={buildMeetingsHref({ house, topic, person, committee })} />}
-            {topic && <ActiveFilterChip label={`テーマ: ${topic}`} href={buildMeetingsHref({ house, person, committee, party })} />}
-            {person && <ActiveFilterChip label={`人物: ${person}`} href={buildMeetingsHref({ house, topic, committee, party })} />}
-            {committee && <ActiveFilterChip label={`委員会: ${committee}`} href={buildMeetingsHref({ house, topic, person, party })} />}
+            {house && <ActiveFilterChip label={`院: ${house}`} href={buildMeetingsHref({ topic, person, committee, party, year, month })} />}
+            {party && activePartyLabel && <ActiveFilterChip label={`会派: ${activePartyLabel}`} href={buildMeetingsHref({ house, topic, person, committee, year, month })} />}
+            {topic && <ActiveFilterChip label={`テーマ: ${topic}`} href={buildMeetingsHref({ house, person, committee, party, year, month })} />}
+            {person && <ActiveFilterChip label={`人物: ${person}`} href={buildMeetingsHref({ house, topic, committee, party, year, month })} />}
+            {committee && <ActiveFilterChip label={`委員会: ${committee}`} href={buildMeetingsHref({ house, topic, person, party, year, month })} />}
+            {periodLabel && <ActiveFilterChip label={`期間: ${periodLabel}`} href={buildMeetingsHref({ house, topic, person, committee, party })} />}
           </div>
         )}
 
@@ -224,38 +284,74 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Sea
 
           <div className="mt-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
             <div className="space-y-5">
+              {/* ── 期間 ── */}
+              <FilterGroup title="期間">
+                <FilterLink
+                  label="すべて"
+                  href={buildMeetingsHref({ house, topic, person, committee, party })}
+                  active={!year}
+                />
+                {Array.from(yearMonths.entries()).map(([y, data]) => (
+                  <FilterLink
+                    key={y}
+                    label={`${y}年 (${data.total})`}
+                    href={buildMeetingsHref({ house, topic, person, committee, party, year: String(y) })}
+                    active={year === String(y) && !month}
+                  />
+                ))}
+              </FilterGroup>
+
+              {/* 年が選択されている場合、月を表示 */}
+              {year && yearMonths.has(Number(year)) && (
+                <FilterGroup title={`${year}年の月別`}>
+                  <FilterLink
+                    label={`${year}年すべて`}
+                    href={buildMeetingsHref({ house, topic, person, committee, party, year })}
+                    active={!!year && !month}
+                  />
+                  {yearMonths.get(Number(year))!.months.map(({ month: m, count }) => (
+                    <FilterLink
+                      key={m}
+                      label={`${m}月 (${count})`}
+                      href={buildMeetingsHref({ house, topic, person, committee, party, year, month: String(m) })}
+                      active={month === String(m)}
+                    />
+                  ))}
+                </FilterGroup>
+              )}
+
               <FilterGroup title="院">
-                <FilterLink label="すべて" href={buildMeetingsHref({ topic, person, committee, party })} active={!house} />
+                <FilterLink label="すべて" href={buildMeetingsHref({ topic, person, committee, party, year, month })} active={!house} />
                 {houses.map((h) => (
-                  <FilterLink key={h.house} label={`${h.house} (${h._count})`} href={buildMeetingsHref({ house: h.house, topic, person, committee, party })} active={house === h.house} />
+                  <FilterLink key={h.house} label={`${h.house} (${h._count})`} href={buildMeetingsHref({ house: h.house, topic, person, committee, party, year, month })} active={house === h.house} />
                 ))}
               </FilterGroup>
 
               <FilterGroup title="会派">
-                <FilterLink label="指定なし" href={buildMeetingsHref({ house, topic, person, committee })} active={!party} />
+                <FilterLink label="指定なし" href={buildMeetingsHref({ house, topic, person, committee, year, month })} active={!party} />
                 {filterOptions.partyOptions.map((p) => (
-                  <PartyFilterLink key={p.id} label={p.shortName} color={p.color} href={buildMeetingsHref({ house, topic, person, committee, party: p.id })} active={party === p.id} />
+                  <PartyFilterLink key={p.id} label={p.shortName} color={p.color} href={buildMeetingsHref({ house, topic, person, committee, party: p.id, year, month })} active={party === p.id} />
                 ))}
               </FilterGroup>
 
               <FilterGroup title="テーマ">
-                <FilterLink label="指定なし" href={buildMeetingsHref({ house, person, committee, party })} active={!topic} />
+                <FilterLink label="指定なし" href={buildMeetingsHref({ house, person, committee, party, year, month })} active={!topic} />
                 {filterOptions.topicOptions.map((item) => (
-                  <FilterLink key={item} label={item} href={buildMeetingsHref({ house, topic: item, person, committee, party })} active={topic === item} />
+                  <FilterLink key={item} label={item} href={buildMeetingsHref({ house, topic: item, person, committee, party, year, month })} active={topic === item} />
                 ))}
               </FilterGroup>
 
               <FilterGroup title="人物" action={<Link href="/people" className="text-xs font-medium text-blue-600 hover:text-blue-700">人物一覧を見る →</Link>}>
-                <FilterLink label="指定なし" href={buildMeetingsHref({ house, topic, committee, party })} active={!person} />
+                <FilterLink label="指定なし" href={buildMeetingsHref({ house, topic, committee, party, year, month })} active={!person} />
                 {filterOptions.personOptions.map((item) => (
-                  <FilterLink key={item} label={item} href={buildMeetingsHref({ house, topic, person: item, committee, party })} active={person === item} />
+                  <FilterLink key={item} label={item} href={buildMeetingsHref({ house, topic, person: item, committee, party, year, month })} active={person === item} />
                 ))}
               </FilterGroup>
 
               <FilterGroup title="委員会">
-                <FilterLink label="指定なし" href={buildMeetingsHref({ house, topic, person, party })} active={!committee} />
+                <FilterLink label="指定なし" href={buildMeetingsHref({ house, topic, person, party, year, month })} active={!committee} />
                 {filterOptions.committeeOptions.map((item) => (
-                  <FilterLink key={item} label={item} href={buildMeetingsHref({ house, topic, person, committee: item, party })} active={committee === item} />
+                  <FilterLink key={item} label={item} href={buildMeetingsHref({ house, topic, person, committee: item, party, year, month })} active={committee === item} />
                 ))}
               </FilterGroup>
             </div>
@@ -272,11 +368,12 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Sea
                 絞り込みをリセット
               </Link>
             )}
-            {house && <Link href={buildMeetingsHref({ topic, person, committee, party })} className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs text-slate-600 hover:border-slate-300 hover:bg-slate-100">院を外す</Link>}
-            {party && <Link href={buildMeetingsHref({ house, topic, person, committee })} className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs text-slate-600 hover:border-slate-300 hover:bg-slate-100">会派を外す</Link>}
-            {topic && <Link href={buildMeetingsHref({ house, person, committee, party })} className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs text-slate-600 hover:border-slate-300 hover:bg-slate-100">テーマを外す</Link>}
-            {person && <Link href={buildMeetingsHref({ house, topic, committee, party })} className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs text-slate-600 hover:border-slate-300 hover:bg-slate-100">人物を外す</Link>}
-            {committee && <Link href={buildMeetingsHref({ house, topic, person, party })} className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs text-slate-600 hover:border-slate-300 hover:bg-slate-100">委員会を外す</Link>}
+            {house && <Link href={buildMeetingsHref({ topic, person, committee, party, year, month })} className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs text-slate-600 hover:border-slate-300 hover:bg-slate-100">院を外す</Link>}
+            {party && <Link href={buildMeetingsHref({ house, topic, person, committee, year, month })} className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs text-slate-600 hover:border-slate-300 hover:bg-slate-100">会派を外す</Link>}
+            {topic && <Link href={buildMeetingsHref({ house, person, committee, party, year, month })} className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs text-slate-600 hover:border-slate-300 hover:bg-slate-100">テーマを外す</Link>}
+            {person && <Link href={buildMeetingsHref({ house, topic, committee, party, year, month })} className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs text-slate-600 hover:border-slate-300 hover:bg-slate-100">人物を外す</Link>}
+            {committee && <Link href={buildMeetingsHref({ house, topic, person, party, year, month })} className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs text-slate-600 hover:border-slate-300 hover:bg-slate-100">委員会を外す</Link>}
+            {year && <Link href={buildMeetingsHref({ house, topic, person, committee, party })} className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs text-slate-600 hover:border-slate-300 hover:bg-slate-100">期間を外す</Link>}
             <Link href="/" className="inline-flex items-center rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-600 hover:border-slate-300 hover:bg-slate-50">今日の会議を見る</Link>
             <Link href="/people" className="inline-flex items-center rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-600 hover:border-slate-300 hover:bg-slate-50">人物一覧を見る</Link>
           </div>
@@ -284,26 +381,13 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Sea
       ) : (
         <>
           <div className="space-y-2">
-            {dateEntries.map(([dateKey, groupMeetings], index) => {
+            {dateEntries.map(([dateKey, groupMeetings]) => {
               const compactLabels = Array.from(new Set(groupMeetings.map((m) => getCompactMeetingLabel(m.nameOfMeeting))));
               const visibleLabels = compactLabels.slice(0, 4);
               const hiddenLabelCount = Math.max(0, compactLabels.length - visibleLabels.length);
 
-              if (index < 2) {
-                return (
-                  <div key={dateKey}>
-                    <DateGroupHeader date={dateKey} count={groupMeetings.length} />
-                    <div className="mb-6 ml-0 grid gap-4 sm:ml-6 sm:grid-cols-2">
-                      {groupMeetings.map((m) => (
-                        <MeetingListCard key={m.id} id={m.id} house={m.house} nameOfMeeting={m.nameOfMeeting} agreementPoints={m.summary?.agreementPoints ?? []} conflictPoints={m.summary?.conflictPoints ?? []} keyTopics={m.summary?.keyTopics ?? []} />
-                      ))}
-                    </div>
-                  </div>
-                );
-              }
-
               return (
-                <details key={dateKey} className="mb-6 overflow-hidden rounded-2xl border border-slate-200 bg-white">
+                <details key={dateKey} className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
                   <summary className="list-none cursor-pointer px-4 py-4">
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div className="min-w-0">
@@ -336,9 +420,9 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Sea
           </div>
 
           <nav className="mt-10 flex items-center justify-center gap-2">
-            {page > 1 && <PaginationLink href={buildMeetingsHref({ house, topic, person, committee, party, page: String(page - 1) })} label="← 前へ" />}
+            {page > 1 && <PaginationLink href={buildMeetingsHref({ house, topic, person, committee, party, year, month, page: String(page - 1) })} label="← 前へ" />}
             <span className="px-4 py-2 text-sm font-medium text-slate-500">{page} / {totalPages}</span>
-            {page < totalPages && <PaginationLink href={buildMeetingsHref({ house, topic, person, committee, party, page: String(page + 1) })} label="次へ →" />}
+            {page < totalPages && <PaginationLink href={buildMeetingsHref({ house, topic, person, committee, party, year, month, page: String(page + 1) })} label="次へ →" />}
           </nav>
         </>
       )}

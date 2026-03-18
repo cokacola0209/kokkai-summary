@@ -799,7 +799,7 @@ export default async function MeetingDetailPage({
     (summary?.speakerSummaries as SpeakerSummary[] | null) ?? [];
 
   // ── 上位4名（2列×2行）はフル表示、残りは折りたたみ ──
-  const FULL_DISPLAY_COUNT = 4;
+  const FULL_DISPLAY_COUNT = 2;
   const fullSpeakers = speakerSummaries.slice(0, FULL_DISPLAY_COUNT);
   const collapsedSpeakers = speakerSummaries.slice(FULL_DISPLAY_COUNT);
 
