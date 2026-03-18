@@ -135,25 +135,32 @@ async function getFilterOptions() {
 }
 
 async function getAvailableYearMonths() {
-  const result = await prisma.$queryRaw<{ year: number; month: number; count: bigint }[]>`
-    SELECT
-      EXTRACT(YEAR FROM date)::int AS year,
-      EXTRACT(MONTH FROM date)::int AS month,
-      COUNT(*)::bigint AS count
-    FROM "Meeting"
-    GROUP BY year, month
-    ORDER BY year DESC, month DESC
-  `;
+  const meetings = await prisma.meeting.findMany({
+    select: { date: true },
+  });
+
   const years = new Map<number, { months: { month: number; count: number }[]; total: number }>();
-  for (const row of result) {
-    if (!years.has(row.year)) {
-      years.set(row.year, { months: [], total: 0 });
+  for (const m of meetings) {
+    const y = m.date.getFullYear();
+    const mo = m.date.getMonth() + 1;
+    if (!years.has(y)) {
+      years.set(y, { months: [], total: 0 });
     }
-    const entry = years.get(row.year)!;
-    const cnt = Number(row.count);
-    entry.months.push({ month: row.month, count: cnt });
-    entry.total += cnt;
+    const entry = years.get(y)!;
+    entry.total++;
+    const existing = entry.months.find((x) => x.month === mo);
+    if (existing) {
+      existing.count++;
+    } else {
+      entry.months.push({ month: mo, count: 1 });
+    }
   }
+
+  // 月を降順ソート
+  for (const entry of Array.from(years.values())) {
+    entry.months.sort((a, b) => b.month - a.month);
+  }
+
   return years;
 }
 
