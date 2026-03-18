@@ -63,7 +63,7 @@ export default function PeoplePageClient({ people }: Props) {
     }
 
     // 各グループ内をあいうえお順ソート
-    for (const g of groupMap.values()) {
+    for (const g of Array.from(groupMap.values())) {
       g.people.sort((a, b) => a.name.localeCompare(b.name, "ja"));
     }
 
