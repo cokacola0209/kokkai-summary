@@ -165,6 +165,23 @@ async function getAvailableYearMonths() {
   return years;
 }
 
+async function getTodayMeetings() {
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const todayEnd = new Date(todayStart);
+  todayEnd.setDate(todayEnd.getDate() + 1);
+
+  return prisma.meeting.findMany({
+    where: { date: { gte: todayStart, lt: todayEnd } },
+    orderBy: { nameOfMeeting: "asc" },
+    include: {
+      summary: {
+        select: { agreementPoints: true, conflictPoints: true, keyTopics: true },
+      },
+    },
+  });
+}
+
 export default async function MeetingsPage({ searchParams }: { searchParams: SearchParams }) {
   const page = Math.max(1, Number(getSingleParam(searchParams.page) ?? 1));
   const house = getSingleParam(searchParams.house);
@@ -212,19 +229,12 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Sea
     ],
   };
 
-  const [totalAll, total, meetings, houses, filterOptions, yearMonths] = await Promise.all([
+  const [totalAll, total, meetings, houses, filterOptions, yearMonths, todayMeetings] = await Promise.all([
     prisma.meeting.count(),
     prisma.meeting.count({ where }),
-    prisma.meeting.findMany({
-      where,
-      orderBy: { date: "desc" },
-      skip: (page - 1) * PAGE_SIZE,
-      take: PAGE_SIZE,
-      include: { summary: { select: { agreementPoints: true, conflictPoints: true, keyTopics: true } } },
-    }),
-    prisma.meeting.groupBy({ by: ["house"], _count: true, orderBy: { _count: { house: "desc" } } }),
-    getFilterOptions(),
+
     getAvailableYearMonths(),
+    getTodayMeetings(),
   ]);
 
   const activePartyLabel = party
@@ -373,6 +383,44 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Sea
           </div>
         </details>
       </div>
+
+ {/* ── 今日の会議 ── */}
+ {page === 1 && !hasActiveFilters && (
+        <div className="mb-8">
+          <h2 className="mb-4 flex items-center gap-2 text-lg font-bold text-slate-800">
+            <span>📅</span> 今日の会議
+          </h2>
+          {todayMeetings.length > 0 ? (
+            <div className="grid gap-3 sm:grid-cols-2">
+              {todayMeetings.map((m) => (
+                <MeetingListCard
+                  key={m.id}
+                  id={m.id}
+                  house={m.house}
+                  nameOfMeeting={m.nameOfMeeting}
+                  agreementPoints={m.summary?.agreementPoints ?? []}
+                  conflictPoints={m.summary?.conflictPoints ?? []}
+                  keyTopics={m.summary?.keyTopics ?? []}
+                />
+              ))}
+            </div>
+          ) : (
+            <div className="rounded-2xl border border-slate-200 bg-white p-5 text-center">
+              <p className="text-sm text-slate-500">本日の会議はまだありません</p>
+              <p className="mt-2 text-xs text-slate-400">
+                下の「過去の会議を探す」から、これまでの会議を検索できます
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── 過去の会議を探す ── */}
+      {page === 1 && !hasActiveFilters && (
+        <h2 className="mb-4 flex items-center gap-2 text-lg font-bold text-slate-800">
+          <span>🔍</span> 過去の会議を探す
+        </h2>
+      )}
 
       {meetings.length === 0 ? (
         <div className="rounded-2xl border border-slate-200 bg-white p-6">
