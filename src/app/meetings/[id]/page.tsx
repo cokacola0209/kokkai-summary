@@ -509,7 +509,7 @@ function SpeakerCard({ s }: { s: SpeakerSummary }) {
           👤
         </div>
         <div>
-          <p className="text-sm font-semibold text-slate-800">{s.speaker}</p>
+          <Link href={`/meetings?person=${encodeURIComponent(s.speaker)}`} className="text-sm font-semibold text-slate-800 hover:text-blue-600 transition-colors">{s.speaker}</Link>
           {s.group && <p className="text-xs text-slate-400">{s.group}</p>}
         </div>
       </div>
@@ -542,7 +542,7 @@ function CollapsedSpeakerCard({ s }: { s: SpeakerSummary }) {
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <p className="text-sm font-semibold text-slate-800">{s.speaker}</p>
+          <Link href={`/meetings?person=${encodeURIComponent(s.speaker)}`} className="text-sm font-semibold text-slate-800 hover:text-blue-600 transition-colors">{s.speaker}</Link>
             {s.group && (
               <span className="text-xs text-slate-400">{s.group}</span>
             )}
@@ -896,7 +896,29 @@ export default async function MeetingDetailPage({
             agreementPoints={summary.agreementPoints}
           />
         )}
-
+    {/* ── この会議の主要発言者 ── */}
+    {speakerSummaries.length > 0 && (
+          <div className="mb-6 rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
+            <p className="mb-3 text-sm font-bold text-slate-700">👥 この会議の主要発言者</p>
+            <div className="flex flex-wrap gap-2">
+              {speakerSummaries.slice(0, 8).map((s, i) => (
+                <Link
+                  key={i}
+                  href={`/meetings?person=${encodeURIComponent(s.speaker)}`}
+                  className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700 transition-colors hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
+                >
+                  <span className="font-medium">{s.speaker}</span>
+                  {s.group && <span className="text-slate-400">{s.group}</span>}
+                </Link>
+              ))}
+              {speakerSummaries.length > 8 && (
+                <span className="inline-flex items-center rounded-full bg-slate-100 px-3 py-1.5 text-xs text-slate-500">
+                  +{speakerSummaries.length - 8}名
+                </span>
+              )}
+            </div>
+          </div>
+        )}
         <div className="grid gap-8 lg:grid-cols-3">
           {/* ── メインカラム ── */}
           <div className="space-y-6 lg:col-span-2">
