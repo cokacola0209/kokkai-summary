@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
-import { HouseBadge } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
@@ -12,96 +11,101 @@ export const metadata: Metadata = {
 };
 
 // ──────────────────────────────────────────
-// データ取得: 会議がある日付を一覧取得
+// データ取得（高速版: クエリ2回のみ）
 // ──────────────────────────────────────────
 
-interface DaySummary {
-  date: Date;
-  dateStr: string;
-  meetingCount: number;
-  houseBreakdown: { shu: number; san: number };
-  topTopics: string[];
-  editorNote: {
-    title: string;
-    introText: string;
-    status: string;
-  } | null;
-}
-
-async function getDailySummaries(): Promise<DaySummary[]> {
-  // 会議のある全日付を取得（新しい順）
-  const dates = await prisma.meeting.findMany({
-    select: { date: true },
-    distinct: ["date"],
+async function getDailySummaries() {
+  // 1回目: 全会議を日付・院・トピック付きでまとめて取得
+  const meetings = await prisma.meeting.findMany({
+    select: {
+      date: true,
+      house: true,
+      summary: {
+        select: { keyTopics: true },
+      },
+    },
     orderBy: { date: "desc" },
   });
 
-  if (dates.length === 0) return [];
+  // 2回目: 全管理者まとめを取得
+  const editorNotes = await prisma.dailyEditorNote.findMany({
+    select: {
+      targetDate: true,
+      title: true,
+      introText: true,
+      status: true,
+    },
+  });
 
-  // 各日付のデータをまとめて取得
-  const results: DaySummary[] = [];
+  // 管理者まとめをマップ化
+  const noteMap = new Map(
+    editorNotes.map((n) => [n.targetDate.toISOString().slice(0, 10), n])
+  );
 
-  for (const { date } of dates) {
-    // 会議件数と院別内訳
-    const meetings = await prisma.meeting.findMany({
-      where: { date },
-      select: {
-        house: true,
-        summary: {
-          select: { keyTopics: true },
-        },
-      },
-    });
-
-    const shu = meetings.filter((m) => m.house === "衆議院").length;
-    const san = meetings.filter((m) => m.house === "参議院").length;
-
-    // トピック集計（上位3つ）
-    const topicCounts = new Map<string, number>();
-    for (const m of meetings) {
-      for (const t of m.summary?.keyTopics ?? []) {
-        topicCounts.set(t, (topicCounts.get(t) ?? 0) + 1);
-      }
+  // JS側で日付ごとに集計
+  const dayMap = new Map<
+    string,
+    {
+      date: Date;
+      dateStr: string;
+      meetingCount: number;
+      shu: number;
+      san: number;
+      topicCounts: Map<string, number>;
     }
-    const topTopics = Array.from(topicCounts.entries())
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 3)
-      .map(([t]) => t);
+  >();
 
-    // 管理者まとめ（あれば）
-    const editorNote = await prisma.dailyEditorNote.findUnique({
-      where: { targetDate: date },
-      select: {
-        title: true,
-        introText: true,
-        status: true,
-      },
-    });
-
-    const dateStr = date.toISOString().slice(0, 10);
-
-    results.push({
-      date,
-      dateStr,
-      meetingCount: meetings.length,
-      houseBreakdown: { shu, san },
-      topTopics,
-      editorNote: editorNote
-        ? {
-            title: editorNote.title,
-            introText: editorNote.introText,
-            status: editorNote.status,
-          }
-        : null,
-    });
+  for (const m of meetings) {
+    const dateStr = m.date.toISOString().slice(0, 10);
+    if (!dayMap.has(dateStr)) {
+      dayMap.set(dateStr, {
+        date: m.date,
+        dateStr,
+        meetingCount: 0,
+        shu: 0,
+        san: 0,
+        topicCounts: new Map(),
+      });
+    }
+    const day = dayMap.get(dateStr)!;
+    day.meetingCount++;
+    if (m.house === "衆議院") day.shu++;
+    else day.san++;
+    for (const t of m.summary?.keyTopics ?? []) {
+      day.topicCounts.set(t, (day.topicCounts.get(t) ?? 0) + 1);
+    }
   }
 
-  return results;
+  // 結果を配列に変換（新しい日付順）
+  return Array.from(dayMap.values())
+    .sort((a, b) => b.date.getTime() - a.date.getTime())
+    .map((day) => {
+      const topTopics = Array.from(day.topicCounts.entries())
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3)
+        .map(([t]) => t);
+
+      const note = noteMap.get(day.dateStr) ?? null;
+
+      return {
+        date: day.date,
+        dateStr: day.dateStr,
+        meetingCount: day.meetingCount,
+        shu: day.shu,
+        san: day.san,
+        topTopics,
+        editorNote: note
+          ? { title: note.title, introText: note.introText, status: note.status }
+          : null,
+      };
+    });
 }
 
 // ──────────────────────────────────────────
 // ページ
 // ──────────────────────────────────────────
+
+type DaySummary = Awaited<ReturnType<typeof getDailySummaries>>[number];
 
 export default async function DailyArchivePage() {
   const days = await getDailySummaries();
@@ -109,12 +113,12 @@ export default async function DailyArchivePage() {
   // 月ごとにグループ化
   const grouped = new Map<string, DaySummary[]>();
   for (const day of days) {
-    const monthKey = day.dateStr.slice(0, 7); // "2026-03"
-    if (!grouped.has(monthKey)) {
-      grouped.set(monthKey, []);
-    }
+    const monthKey = day.dateStr.slice(0, 7);
+    if (!grouped.has(monthKey)) grouped.set(monthKey, []);
     grouped.get(monthKey)!.push(day);
   }
+
+  const totalMeetings = days.reduce((sum, d) => sum + d.meetingCount, 0);
 
   return (
     <div className="mx-auto max-w-5xl px-3 py-5 sm:px-4 sm:py-8">
@@ -166,12 +170,10 @@ export default async function DailyArchivePage() {
       <div className="mb-6 flex items-center gap-4 text-sm text-slate-500">
         <span>全 {days.length} 日分</span>
         <span>·</span>
-        <span>
-          {days.reduce((sum, d) => sum + d.meetingCount, 0).toLocaleString()} 件の会議
-        </span>
+        <span>{totalMeetings.toLocaleString()} 件の会議</span>
       </div>
 
-      {/* ── 一覧（月別グループ） ── */}
+      {/* ── 一覧 ── */}
       {days.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20 text-slate-400">
           <span className="text-5xl mb-4">📭</span>
@@ -183,7 +185,6 @@ export default async function DailyArchivePage() {
             const [year, month] = monthKey.split("-");
             return (
               <section key={monthKey}>
-                {/* 月見出し */}
                 <div className="mb-3 flex items-center gap-3">
                   <h2 className="text-base font-bold text-slate-800">
                     {year}年{parseInt(month)}月
@@ -194,7 +195,6 @@ export default async function DailyArchivePage() {
                   <div className="flex-1 border-t border-slate-200" />
                 </div>
 
-                {/* 日付カード一覧 */}
                 <div className="space-y-2">
                   {monthDays.map((day) => (
                     <DayCard key={day.dateStr} day={day} />
@@ -221,7 +221,8 @@ function DayCard({ day }: { day: DaySummary }) {
     weekday: "short",
   });
 
-  const hasEditorNote = day.editorNote && day.editorNote.status === "published";
+  const hasEditorNote =
+    day.editorNote && day.editorNote.status === "published";
 
   return (
     <Link
@@ -229,9 +230,7 @@ function DayCard({ day }: { day: DaySummary }) {
       className="group block rounded-2xl border border-slate-200 bg-white p-4 transition-all duration-150 hover:border-blue-300 hover:shadow-sm sm:p-5"
     >
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        {/* 左: メイン情報 */}
         <div className="min-w-0 flex-1">
-          {/* 日付 + バッジ */}
           <div className="mb-2 flex flex-wrap items-center gap-2">
             <span className="text-base font-bold text-slate-800 group-hover:text-blue-700 transition-colors">
               {displayDate}
@@ -243,7 +242,6 @@ function DayCard({ day }: { day: DaySummary }) {
             )}
           </div>
 
-          {/* 管理者まとめ タイトル + 冒頭文 */}
           {hasEditorNote && day.editorNote!.title && (
             <p className="mb-1 text-sm font-medium text-slate-700">
               {day.editorNote!.title}
@@ -255,7 +253,6 @@ function DayCard({ day }: { day: DaySummary }) {
             </p>
           )}
 
-          {/* トピックタグ */}
           {day.topTopics.length > 0 && (
             <div className="mt-2 flex flex-wrap gap-1.5">
               {day.topTopics.map((topic) => (
@@ -270,18 +267,16 @@ function DayCard({ day }: { day: DaySummary }) {
           )}
         </div>
 
-        {/* 右: メタ情報 */}
         <div className="flex shrink-0 items-center gap-3 sm:flex-col sm:items-end sm:gap-1.5">
           <span className="rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">
             {day.meetingCount}件の会議
           </span>
           <span className="text-[11px] text-slate-400">
-            衆{day.houseBreakdown.shu} / 参{day.houseBreakdown.san}
+            衆{day.shu} / 参{day.san}
           </span>
         </div>
       </div>
 
-      {/* 「まとめを見る」 */}
       <p className="mt-3 text-xs text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity">
         この日のまとめを見る →
       </p>
