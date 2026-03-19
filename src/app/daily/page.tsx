@@ -15,7 +15,6 @@ export const metadata: Metadata = {
 // ──────────────────────────────────────────
 
 async function getDailySummaries() {
-  // 1回目: 全会議を日付・院・トピック付きでまとめて取得
   const meetings = await prisma.meeting.findMany({
     select: {
       date: true,
@@ -27,7 +26,6 @@ async function getDailySummaries() {
     orderBy: { date: "desc" },
   });
 
-  // 2回目: 全管理者まとめを取得
   const editorNotes = await prisma.dailyEditorNote.findMany({
     select: {
       targetDate: true,
@@ -37,12 +35,10 @@ async function getDailySummaries() {
     },
   });
 
-  // 管理者まとめをマップ化
   const noteMap = new Map(
     editorNotes.map((n) => [n.targetDate.toISOString().slice(0, 10), n])
   );
 
-  // JS側で日付ごとに集計
   const dayMap = new Map<
     string,
     {
@@ -76,7 +72,6 @@ async function getDailySummaries() {
     }
   }
 
-  // 結果を配列に変換（新しい日付順）
   return Array.from(dayMap.values())
     .sort((a, b) => b.date.getTime() - a.date.getTime())
     .map((day) => {
@@ -90,6 +85,7 @@ async function getDailySummaries() {
       return {
         date: day.date,
         dateStr: day.dateStr,
+        monthKey: day.dateStr.slice(0, 7),
         meetingCount: day.meetingCount,
         shu: day.shu,
         san: day.san,
@@ -107,18 +103,37 @@ async function getDailySummaries() {
 
 type DaySummary = Awaited<ReturnType<typeof getDailySummaries>>[number];
 
-export default async function DailyArchivePage() {
-  const days = await getDailySummaries();
+interface Props {
+  searchParams?: {
+    month?: string; // "2026-03" 形式
+  };
+}
 
-  // 月ごとにグループ化
-  const grouped = new Map<string, DaySummary[]>();
-  for (const day of days) {
-    const monthKey = day.dateStr.slice(0, 7);
-    if (!grouped.has(monthKey)) grouped.set(monthKey, []);
-    grouped.get(monthKey)!.push(day);
+export default async function DailyArchivePage({ searchParams }: Props) {
+  const allDays = await getDailySummaries();
+
+  // 利用可能な年月リスト（新しい順）
+  const availableMonths = Array.from(
+    new Set(allDays.map((d) => d.monthKey))
+  ).sort((a, b) => b.localeCompare(a));
+
+  // 選択中の月（デフォルト: 最新月）
+  const activeMonth = searchParams?.month && availableMonths.includes(searchParams.month)
+    ? searchParams.month
+    : availableMonths[0] ?? "";
+
+  // フィルタ適用
+  const filteredDays = activeMonth
+    ? allDays.filter((d) => d.monthKey === activeMonth)
+    : allDays;
+
+  const totalMeetings = allDays.reduce((sum, d) => sum + d.meetingCount, 0);
+
+  // 月表示用のラベル
+  function monthLabel(monthKey: string) {
+    const [y, m] = monthKey.split("-");
+    return `${y}年${parseInt(m)}月`;
   }
-
-  const totalMeetings = days.reduce((sum, d) => sum + d.meetingCount, 0);
 
   return (
     <div className="mx-auto max-w-5xl px-3 py-5 sm:px-4 sm:py-8">
@@ -167,42 +182,61 @@ export default async function DailyArchivePage() {
       </div>
 
       {/* ── 統計 ── */}
-      <div className="mb-6 flex items-center gap-4 text-sm text-slate-500">
-        <span>全 {days.length} 日分</span>
+      <div className="mb-4 flex items-center gap-4 text-sm text-slate-500">
+        <span>全 {allDays.length} 日分</span>
         <span>·</span>
         <span>{totalMeetings.toLocaleString()} 件の会議</span>
       </div>
 
-      {/* ── 一覧 ── */}
-      {days.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-20 text-slate-400">
-          <span className="text-5xl mb-4">📭</span>
-          <p className="text-base">まだまとめがありません</p>
-        </div>
-      ) : (
-        <div className="space-y-8">
-          {Array.from(grouped).map(([monthKey, monthDays]) => {
-            const [year, month] = monthKey.split("-");
+      {/* ── 年月フィルタ ── */}
+      <div className="mb-6" id="filters">
+        <p className="mb-2 text-xs font-medium text-slate-400">月で絞り込み</p>
+        <div className="flex flex-wrap gap-2">
+          {availableMonths.map((m) => {
+            const isActive = activeMonth === m;
+            const count = allDays.filter((d) => d.monthKey === m).length;
             return (
-              <section key={monthKey}>
-                <div className="mb-3 flex items-center gap-3">
-                  <h2 className="text-base font-bold text-slate-800">
-                    {year}年{parseInt(month)}月
-                  </h2>
-                  <span className="text-xs text-slate-400">
-                    {monthDays.length}日分
-                  </span>
-                  <div className="flex-1 border-t border-slate-200" />
-                </div>
-
-                <div className="space-y-2">
-                  {monthDays.map((day) => (
-                    <DayCard key={day.dateStr} day={day} />
-                  ))}
-                </div>
-              </section>
+              <Link
+                key={m}
+                href={`/daily?month=${m}`}
+                className={`inline-flex items-center gap-1.5 rounded-full px-3.5 py-2 text-sm font-medium transition-all ${
+                  isActive
+                    ? "bg-slate-800 text-white shadow-sm"
+                    : "bg-white text-slate-600 border border-slate-200 hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
+                }`}
+              >
+                {monthLabel(m)}
+                <span
+                  className={`rounded-full px-1.5 py-0.5 text-xs ${
+                    isActive
+                      ? "bg-white/20 text-white"
+                      : "bg-slate-100 text-slate-500"
+                  }`}
+                >
+                  {count}
+                </span>
+              </Link>
             );
           })}
+        </div>
+      </div>
+
+      {/* ── 件数表示 ── */}
+      <p className="mb-4 text-sm text-slate-500">
+        {activeMonth ? `${monthLabel(activeMonth)}: ${filteredDays.length}日分` : `全${allDays.length}日分`}
+      </p>
+
+      {/* ── 一覧 ── */}
+      {filteredDays.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-20 text-slate-400">
+          <span className="text-5xl mb-4">📭</span>
+          <p className="text-base">この月のまとめはありません</p>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {filteredDays.map((day) => (
+            <DayCard key={day.dateStr} day={day} />
+          ))}
         </div>
       )}
     </div>
