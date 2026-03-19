@@ -443,7 +443,7 @@ export function BeginnerGuide() {
           <div className="rounded-lg bg-red-50/50 p-4">
             <p className="font-semibold text-slate-700 mb-1">⚠️ AI要約について</p>
             <p>
-              要約はAIが自動生成したものであり、正確性を保証するものではありません。重要な内容については、必ず「一次情報を見る」リンクから原文をご確認ください。
+              要約は正確性を保証するものではありません。重要な内容については、「一次情報を見る」リンクから原文をご確認ください。
             </p>
           </div>
         </div>

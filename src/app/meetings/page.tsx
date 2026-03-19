@@ -290,7 +290,7 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Sea
     <div id="filters" className="mb-8 rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <p className="text-sm font-semibold text-slate-800">絞り込み</p>
+            <p className="text-sm font-semibold text-slate-800">会議検索・絞り込み</p>
             <p className="mt-1 text-xs text-slate-500">院・会派・テーマ・人物・委員会・期間で絞り込めます。</p>
           </div>
           {hasActiveFilters && (
