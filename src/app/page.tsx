@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { AccordionDetails } from "@/components/Accordion";
 import { prisma } from "@/lib/prisma";
 import {
   SummaryCard,
@@ -758,17 +759,38 @@ return (
 
             {/* 会議別まとめ */}
             <Section title={`会議別まとめ（${meetings.length}件）`} icon="📋">
-              <div className="space-y-4">
-                {meetings.map((m) => (
-                  <SummaryCard
+              <div className="space-y-2">
+                {meetings.map((m, i) => (
+                  <AccordionDetails
                     key={m.id}
-                    id={m.id}
-                    date={m.date.toLocaleDateString("ja-JP")}
-                    house={m.house}
-                    nameOfMeeting={m.nameOfMeeting}
-                    bullets={m.summary?.bullets ?? []}
-                    keyTopics={m.summary?.keyTopics ?? []}
-                  />
+                    defaultOpen={i === 0}
+                    title={m.nameOfMeeting}
+                    badge={m.house}
+                    subtitle={
+                      m.summary?.keyTopics && m.summary.keyTopics.length > 0
+                        ? m.summary.keyTopics.slice(0, 3).map(t => `#${t}`).join("  ")
+                        : undefined
+                    }
+                  >
+                    {m.summary?.bullets && m.summary.bullets.length > 0 ? (
+                      <ul className="space-y-1.5 mb-3">
+                        {m.summary.bullets.slice(0, 3).map((b, j) => (
+                          <li key={j} className="text-sm text-slate-600 flex gap-2">
+                            <span className="text-blue-400 mt-0.5 shrink-0">•</span>
+                            <span className="line-clamp-2">{b}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="text-sm text-slate-400 mb-3">要約を生成中です…</p>
+                    )}
+                    <Link
+                      href={`/meetings/${m.id}`}
+                      className="inline-flex items-center text-xs font-medium text-blue-600 hover:text-blue-700"
+                    >
+                      詳しく見る →
+                    </Link>
+                  </AccordionDetails>
                 ))}
               </div>
             </Section>
