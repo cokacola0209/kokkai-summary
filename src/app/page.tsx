@@ -71,7 +71,7 @@ export async function generateMetadata(): Promise<Metadata> {
     : "";
 
   return {
-    title: `今日の国会まとめ${dateStr ? ` – ${dateStr}` : ""}`,
+    title: `直近の国会まとめ${dateStr ? ` – ${dateStr}` : ""}`,
     description: `${dateStr}の国会審議をAIが3分で要約。根拠・影響・未解決点を構造化表示。`,
   };
 }
@@ -568,7 +568,7 @@ export default async function HomePage() {
         🔥 注目テーマ・分野
       </p>
       <p className="mt-1 text-xs leading-relaxed text-slate-500">
-        今日よく出てきたテーマや、関心分野から入れます。
+        直近の国会でよく出てきたテーマや、関心分野から入れます。
       </p>
 
       <div className="mt-3">
@@ -663,11 +663,11 @@ export default async function HomePage() {
 </div>
 </div>
 
-      {/* 今日の会議 */}
+      {/* 直近の会議 */}
       <div className="card">
         <div className="flex items-center justify-between gap-3">
           <p className="text-sm font-semibold text-slate-800">
-            📌 今日の会議
+            📌 直近の会議
           </p>
           <Link
             href="/meetings"

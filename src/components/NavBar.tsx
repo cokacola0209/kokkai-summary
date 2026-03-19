@@ -16,7 +16,7 @@ export function NavBar() {
             href="/"
             className="hover:text-slate-300 transition py-1 border-b-2 border-transparent hover:border-slate-400"
           >
-            今日のまとめ
+            直近のまとめ
           </Link>
           <Link
             href="/meetings"
