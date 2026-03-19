@@ -6,6 +6,7 @@ import { MeetingListCard, NoData, DateGroupHeader } from "@/components/ui";
 import { AccordionDetails } from "@/components/Accordion";
 
 export const revalidate = 3600;
+export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
   title: "会議一覧",
@@ -285,8 +286,8 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Sea
         </p>
       </div>
 
-      {/* 絞り込みエリア */}
-      <div className="mb-8 rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
+    {/* 絞り込みエリア */}
+    <div id="filters" className="mb-8 rounded-2xl border border-slate-200 bg-white p-4 sm:p-5">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <p className="text-sm font-semibold text-slate-800">絞り込み</p>
@@ -392,11 +393,11 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Sea
         </details>
       </div>
 
- {/* ── 今日の会議 ── */}
+ {/* ── 直近の会議 ── */}
  {page === 1 && !hasActiveFilters && (
         <div className="mb-8">
           <h2 className="mb-4 flex items-center gap-2 text-lg font-bold text-slate-800">
-            <span>📅</span> 今日の会議
+            <span>📅</span> 直近の会議
           </h2>
           {todayMeetings.length > 0 ? (
             <div className="grid gap-3 sm:grid-cols-2">
@@ -445,7 +446,7 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Sea
             {person && <Link href={buildMeetingsHref({ house, topic, committee, party, year, month })} className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs text-slate-600 hover:border-slate-300 hover:bg-slate-100">人物を外す</Link>}
             {committee && <Link href={buildMeetingsHref({ house, topic, person, party, year, month })} className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs text-slate-600 hover:border-slate-300 hover:bg-slate-100">委員会を外す</Link>}
             {year && <Link href={buildMeetingsHref({ house, topic, person, committee, party })} className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs text-slate-600 hover:border-slate-300 hover:bg-slate-100">期間を外す</Link>}
-            <Link href="/" className="inline-flex items-center rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-600 hover:border-slate-300 hover:bg-slate-50">今日の会議を見る</Link>
+            <Link href="/" className="inline-flex items-center rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-600 hover:border-slate-300 hover:bg-slate-50">直近の会議を見る</Link>
             <Link href="/people" className="inline-flex items-center rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-600 hover:border-slate-300 hover:bg-slate-50">人物一覧を見る</Link>
           </div>
         </div>
