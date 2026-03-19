@@ -130,7 +130,6 @@ async function getFilterOptions() {
   });
   const partyOptions = parties
     .sort((a, b) => b._count.speeches - a._count.speeches)
-    .slice(0, 12)
     .map((p) => ({ id: p.id, shortName: p.shortName, color: p.color }));
 
   return { topicOptions, personOptions, committeeOptions, partyOptions };
