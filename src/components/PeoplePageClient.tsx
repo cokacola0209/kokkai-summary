@@ -137,6 +137,12 @@ export default function PeoplePageClient({ people }: Props) {
           className="w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm text-slate-700 outline-none transition-colors placeholder:text-slate-400 focus:border-blue-300 focus:bg-white focus:ring-2 focus:ring-blue-100"
         />
       </div>
+      {/* ── 件数表示 ── */}
+      <p className="text-sm text-slate-500">
+        {isSearching
+          ? `${people.length}人中 ${filteredPartyGroups.reduce((sum, g) => sum + g.people.length, 0) + filteredSpecialGroups.reduce((sum, g) => sum + g.people.length, 0)}人が一致`
+          : `全 ${people.length}人`}
+      </p>
 
       {/* ── 注目の人物（検索中は非表示） ── */}
       {!isSearching && (

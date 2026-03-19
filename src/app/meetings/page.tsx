@@ -211,7 +211,8 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Sea
     ],
   };
 
-  const [total, meetings, houses, filterOptions, yearMonths] = await Promise.all([
+  const [totalAll, total, meetings, houses, filterOptions, yearMonths] = await Promise.all([
+    prisma.meeting.count(),
     prisma.meeting.count({ where }),
     prisma.meeting.findMany({
       where,
@@ -251,8 +252,14 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Sea
       <div className="mb-6">
         <h1 className="mb-1 text-2xl font-bold text-slate-900">会議一覧</h1>
         <p className="text-sm text-slate-500">
-          全 {total.toLocaleString()} 件の会議録
-          {hasActiveFilters && <span> — 条件で絞り込み中</span>}
+          {hasActiveFilters
+            ? `全 ${totalAll.toLocaleString()} 件中 ${total.toLocaleString()} 件に絞り込み中`
+            : `全 ${total.toLocaleString()} 件の会議録`}
+          {meetings.length < total && (
+            <span className="ml-1 text-slate-400">
+              （このページ: {meetings.length}件）
+            </span>
+          )}
         </p>
         <p className="mt-2 text-sm text-slate-400">
           会議名 → 何が決まったか → 主な争点 → タグ の順で、ざっと比較できます。
