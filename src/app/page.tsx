@@ -830,6 +830,14 @@ return (
               href="/meetings"
               className="block card text-center hover:border-blue-300"
             >
+              <Link
+              href="/daily"
+              className="block card text-center hover:border-blue-300"
+            >
+              <p className="text-sm font-medium text-blue-600">
+                📅 過去の日にち別まとめを見る →
+              </p>
+            </Link>
               <p className="text-sm font-medium text-blue-600">
                 📚 過去の会議一覧を見る →
               </p>

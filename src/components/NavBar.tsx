@@ -81,11 +81,18 @@ export function NavBar() {
                   法案一覧
                 </Link>
                 <Link
-                  href="/"
+                  href="/daily"
                   className="flex items-center gap-2.5 px-4 py-2.5 text-sm text-slate-700 transition-colors hover:bg-slate-50"
                 >
                   <span className="text-base">📅</span>
-                  直近のまとめ
+                  日にち別まとめ
+                </Link>
+                <Link
+                  href="/"
+                  className="flex items-center gap-2.5 px-4 py-2.5 text-sm text-slate-700 transition-colors hover:bg-slate-50"
+                >
+                  <span className="text-base">🏠</span>
+                  トップページ
                 </Link>
               </nav>
             </div>
