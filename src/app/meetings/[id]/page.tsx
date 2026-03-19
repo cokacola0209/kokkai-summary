@@ -845,7 +845,7 @@ export default async function MeetingDetailPage({
     <>
       <MeetingJsonLd meeting={meeting} />
 
-      <div className="mx-auto max-w-5xl px-4 py-8">
+      <div className="mx-auto max-w-5xl px-3 py-5 sm:px-4 sm:py-8">
         {/* パンくず */}
         <nav className="mb-4 text-sm text-slate-400 fade-in">
           <Link href="/" className="transition hover:text-slate-600">
