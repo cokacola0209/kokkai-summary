@@ -12,6 +12,7 @@ import {
 } from "@/components/ui";
 
 export const revalidate = 3600;
+export const dynamic = "force-dynamic";
 
 interface Props {
   params: { id: string };
