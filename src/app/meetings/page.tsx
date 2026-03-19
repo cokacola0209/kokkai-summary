@@ -3,6 +3,7 @@ import Link from "next/link";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { MeetingListCard, NoData, DateGroupHeader } from "@/components/ui";
+import { AccordionDetails } from "@/components/Accordion";
 
 export const revalidate = 3600;
 
@@ -401,34 +402,27 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Sea
               const hiddenLabelCount = Math.max(0, compactLabels.length - visibleLabels.length);
 
               return (
-                <details key={dateKey} className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
-                  <summary className="list-none cursor-pointer px-4 py-4">
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <p className="text-base font-semibold text-slate-800">{dateKey}</p>
-                          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-500">{groupMeetings.length}件</span>
-                        </div>
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          {visibleLabels.map((label) => (
-                            <span key={label} className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs text-slate-600">{label}</span>
-                          ))}
-                          {hiddenLabelCount > 0 && (
-                            <span className="inline-flex items-center rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-500">+{hiddenLabelCount}</span>
-                          )}
-                        </div>
-                      </div>
-                      <span className="shrink-0 text-xs font-medium text-blue-600">開く / 閉じる</span>
-                    </div>
-                  </summary>
-                  <div className="border-t border-slate-100 px-4 pb-4 pt-4">
-                    <div className="grid gap-4 sm:grid-cols-2">
-                      {groupMeetings.map((m) => (
-                        <MeetingListCard key={m.id} id={m.id} house={m.house} nameOfMeeting={m.nameOfMeeting} agreementPoints={m.summary?.agreementPoints ?? []} conflictPoints={m.summary?.conflictPoints ?? []} keyTopics={m.summary?.keyTopics ?? []} />
-                      ))}
-                    </div>
+                <AccordionDetails
+                key={dateKey}
+                title={dateKey}
+                badge={`${groupMeetings.length}件`}
+                subtitle={
+                  <div className="flex flex-wrap gap-2">
+                    {visibleLabels.map((label) => (
+                      <span key={label} className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs text-slate-600">{label}</span>
+                    ))}
+                    {hiddenLabelCount > 0 && (
+                      <span className="inline-flex items-center rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-500">+{hiddenLabelCount}</span>
+                    )}
                   </div>
-                </details>
+                }
+              >
+                <div className="grid gap-4 sm:grid-cols-2">
+                  {groupMeetings.map((m) => (
+                    <MeetingListCard key={m.id} id={m.id} house={m.house} nameOfMeeting={m.nameOfMeeting} agreementPoints={m.summary?.agreementPoints ?? []} conflictPoints={m.summary?.conflictPoints ?? []} keyTopics={m.summary?.keyTopics ?? []} />
+                  ))}
+                </div>
+              </AccordionDetails>
               );
             })}
           </div>

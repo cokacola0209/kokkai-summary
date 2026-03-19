@@ -535,8 +535,8 @@ function CollapsedSpeakerCard({ s }: { s: SpeakerSummary }) {
   const summaryPreview = shortenText(s.summary, 50);
 
   return (
-    <details className="overflow-hidden rounded-2xl border border-slate-200 bg-white transition-all">
-      <summary className="flex cursor-pointer list-none items-center gap-3 px-4 py-3">
+    <details className="group overflow-hidden rounded-2xl border border-slate-200 bg-white transition-shadow hover:shadow-sm">
+      <summary className="flex cursor-pointer list-none items-center gap-3 px-4 py-3.5 transition-colors hover:bg-slate-50 [&::-webkit-details-marker]:hidden">
         <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-100 text-sm">
           👤
         </div>
@@ -551,9 +551,15 @@ function CollapsedSpeakerCard({ s }: { s: SpeakerSummary }) {
             {summaryPreview}
           </p>
         </div>
-        <span className="shrink-0 text-xs font-medium text-blue-600">
-          詳しく
-        </span>
+        <svg
+          className="h-4 w-4 shrink-0 text-slate-400 transition-transform duration-200 group-open:rotate-180"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          strokeWidth={2}
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+        </svg>
       </summary>
 
       <div className="border-t border-slate-100 px-4 pb-4 pt-3">
