@@ -453,7 +453,6 @@ export default async function HomePage() {
 
   const partyBalance = await getPartyBalance();
 
-  const partyBalance = await getPartyBalance();
 
 // ↓↓↓ ここから追加 ↓↓↓
 const recentBills = await prisma.bill.findMany({
