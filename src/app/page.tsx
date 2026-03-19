@@ -9,6 +9,7 @@ import {
   BeginnerGuide,
   StatCard,
 } from "@/components/ui";
+import { EditorNoteCard } from "@/components/EditorNoteCard";
 
 export const revalidate = 0;
 
@@ -472,6 +473,9 @@ export default async function HomePage() {
             最新反映日: {dateStr} ・ 新しい会議録はすぐに反映されない場合があります
           </p>
         </div>
+
+        {/* 管理者まとめ */}
+        <EditorNoteCard />
 
         {/* ── 統計バー ── */}
         <div className="mb-8 grid grid-cols-2 gap-3 fade-in-up delay-1 sm:grid-cols-4">

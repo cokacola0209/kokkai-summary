@@ -24,7 +24,7 @@ export async function EditorNoteCard() {
       </div>
 
       <p className="text-xs text-slate-500 mb-2">
-        若者、政治勉強中の皆様向け
+        若年層の方々、政治勉強中の皆様向け
       </p>
       <h2 className="text-lg font-bold text-slate-800 mb-2">
         {note.title || "本日の管理者の総まとめ"}
