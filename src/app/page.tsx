@@ -463,10 +463,13 @@ export default async function HomePage() {
             {dateStr} の国会 — {meetings.length} 件の審議
           </p>
           <h1 className="text-3xl font-bold text-slate-900">
-            今日の国会 3分まとめ
+            直近の国会 3分まとめ
           </h1>
           <p className="mt-2 text-sm text-slate-500">
-            国立国会図書館の会議録をもとに、その日の国会審議をAIでわかりやすく整理・要約しています。
+            国立国会図書館の会議録をもとに、国会議事録をAIでわかりやすく整理・要約しています。
+          </p>
+          <p className="mt-1 text-xs text-slate-400">
+            最新反映日: {dateStr} ・ 新しい会議録はすぐに反映されない場合があります
           </p>
         </div>
 

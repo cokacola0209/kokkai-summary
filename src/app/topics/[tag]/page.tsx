@@ -10,7 +10,7 @@ interface Props {
 }
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
-  const tag = decodeURIComponent(params.tag);
+  const tag = decodeURIComponent(params.tag).replace(/^[#＃]+/, "").trim();
   return {
     title: `#${tag} の会議`,
     description: `「${tag}」タグが付いた国会会議録の一覧`,
@@ -18,7 +18,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 }
 
 export default async function TopicPage({ params }: Props) {
-  const tag = decodeURIComponent(params.tag);
+  const tag = decodeURIComponent(params.tag).replace(/^[#＃]+/, "").trim();
 
   const summaries = await prisma.summary.findMany({
     where: {

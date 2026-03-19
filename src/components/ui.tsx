@@ -23,12 +23,13 @@ export function HouseBadge({ house }: { house: string }) {
 }
 
 export function TopicTag({ tag }: { tag: string }) {
+  const cleaned = tag.replace(/^[#＃]+/, "").trim();
   return (
     <Link
-      href={`/topics/${encodeURIComponent(tag)}`}
+      href={`/topics/${encodeURIComponent(cleaned)}`}
       className="inline-block rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600 hover:bg-blue-50 hover:text-blue-700 transition-colors duration-150"
     >
-      #{tag}
+      #{cleaned}
     </Link>
   );
 }

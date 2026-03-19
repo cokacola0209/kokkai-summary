@@ -10,7 +10,7 @@ export const metadata: Metadata = {
     process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000"
   ),
   title: {
-    default: "国会ラボ – 今日の国会2分まとめ",
+    default: "国会ラボ – 直近の国会2分まとめ",
     template: "%s | 国会ラボ",
   },
   description:
