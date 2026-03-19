@@ -52,8 +52,8 @@ export async function POST(request: Request) {
     dayEnd.setDate(dayEnd.getDate() + 1);
 
     const meetingCount = await prisma.meeting.count({
-      where: { date: { gte: dayStart, lt: dayEnd } },
-    });
+        where: { date: dayStart },
+      });
 
     if (meetingCount === 0) {
       return NextResponse.json(

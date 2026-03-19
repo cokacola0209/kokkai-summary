@@ -38,7 +38,7 @@ export async function generateDailyEditorNote(targetDate?: Date) {
 
   // 対象日の会議と要約を取得
   const meetings = await prisma.meeting.findMany({
-    where: { date: { gte: dayStart, lt: dayEnd } },
+    where: { date: dayStart },
     include: {
       summary: true,
       _count: { select: { speeches: true } },
