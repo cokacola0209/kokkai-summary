@@ -35,6 +35,13 @@ function toDateInputValue(iso: string) {
 }
 
 export default function EditorNotePage() {
+  // ── 認証 ──
+  const [password, setPassword] = useState("");
+  const [authenticated, setAuthenticated] = useState(false);
+  const [authError, setAuthError] = useState("");
+  const [authChecking, setAuthChecking] = useState(false);
+
+  // ── データ ──
   const [notes, setNotes] = useState<Note[]>([]);
   const [selected, setSelected] = useState<Note | null>(null);
   const [editTitle, setEditTitle] = useState("");
@@ -51,15 +58,36 @@ export default function EditorNotePage() {
   });
   const [creating, setCreating] = useState(false);
 
-  // データ読み込み
-  useEffect(() => {
-    fetchNotes();
-  }, []);
+  // パスワードを含むfetchヘルパー
+  function authHeaders(): Record<string, string> {
+    return {
+      "Content-Type": "application/json",
+      "x-admin-key": password,
+    };
+  }
 
-  async function fetchNotes() {
-    const res = await fetch("/api/admin/editor-notes");
-    const data = await res.json();
-    setNotes(data.notes ?? []);
+  // ── ログイン ──
+  async function handleLogin() {
+    setAuthChecking(true);
+    setAuthError("");
+
+    try {
+      const res = await fetch("/api/admin/editor-notes", {
+        headers: { "x-admin-key": password },
+      });
+
+      if (res.ok) {
+        setAuthenticated(true);
+        const data = await res.json();
+        setNotes(data.notes ?? []);
+      } else {
+        setAuthError("パスワードが正しくありません");
+      }
+    } catch {
+      setAuthError("通信エラーが発生しました");
+    }
+
+    setAuthChecking(false);
   }
 
   function selectNote(note: Note) {
@@ -78,11 +106,18 @@ export default function EditorNotePage() {
     }
   }
 
+  async function fetchNotes() {
+    const res = await fetch("/api/admin/editor-notes", {
+      headers: { "x-admin-key": password },
+    });
+    const data = await res.json();
+    setNotes(data.notes ?? []);
+  }
+
   // ── 新規作成 ──
   async function handleCreate() {
     if (!newDate) return;
 
-    // 既に存在するかチェック
     const existing = notes.find(
       (n) => toDateInputValue(n.targetDate) === newDate
     );
@@ -98,7 +133,7 @@ export default function EditorNotePage() {
     try {
       const res = await fetch("/api/admin/editor-notes", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: authHeaders(),
         body: JSON.stringify({ targetDate: newDate }),
       });
 
@@ -110,12 +145,10 @@ export default function EditorNotePage() {
         return;
       }
 
-      // 一覧を再読み込みして新しいノートを選択
       await fetchNotes();
-      // 再読み込み後のnotesには反映されないので、直接selectする
       selectNote(data.note);
       showMessage(`${formatDate(data.note.targetDate)} のAI下書きを生成しました（会議 ${data.meetingCount} 件）`);
-    } catch (e) {
+    } catch {
       showMessage("ネットワークエラーが発生しました", "error");
     }
 
@@ -138,7 +171,7 @@ export default function EditorNotePage() {
       const dateStr = toDateInputValue(selected.targetDate);
       const res = await fetch("/api/admin/editor-notes", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: authHeaders(),
         body: JSON.stringify({ targetDate: dateStr }),
       });
 
@@ -153,7 +186,7 @@ export default function EditorNotePage() {
       await fetchNotes();
       selectNote(data.note);
       showMessage("AI下書きを再生成しました");
-    } catch (e) {
+    } catch {
       showMessage("ネットワークエラーが発生しました", "error");
     }
 
@@ -168,7 +201,7 @@ export default function EditorNotePage() {
 
     const res = await fetch("/api/admin/editor-notes", {
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
+      headers: authHeaders(),
       body: JSON.stringify({
         id: selected.id,
         title: editTitle,
@@ -204,6 +237,53 @@ export default function EditorNotePage() {
     showMessage("AI下書きを本文にコピーしました");
   }
 
+  // ════════════════════════════════════════
+  // パスワード画面
+  // ════════════════════════════════════════
+  if (!authenticated) {
+    return (
+      <div className="mx-auto max-w-md px-4 py-20">
+        <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="mb-6 text-center">
+            <p className="text-3xl mb-2">🔒</p>
+            <h1 className="text-xl font-bold text-slate-900">管理者ログイン</h1>
+            <p className="mt-2 text-sm text-slate-500">
+              管理者パスワードを入力してください
+            </p>
+          </div>
+
+          {authError && (
+            <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {authError}
+            </div>
+          )}
+
+          <div className="space-y-4">
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleLogin()}
+              placeholder="パスワード"
+              className="w-full rounded-lg border border-slate-200 px-4 py-3 text-sm outline-none focus:border-blue-300 focus:ring-2 focus:ring-blue-100"
+              autoFocus
+            />
+            <button
+              onClick={handleLogin}
+              disabled={authChecking || !password}
+              className="w-full rounded-lg bg-slate-800 px-4 py-3 text-sm font-medium text-white transition-colors hover:bg-slate-700 disabled:opacity-50"
+            >
+              {authChecking ? "確認中..." : "ログイン"}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ════════════════════════════════════════
+  // メイン画面（認証後）
+  // ════════════════════════════════════════
   return (
     <div className="mx-auto max-w-5xl px-4 py-8">
       <h1 className="mb-2 text-2xl font-bold text-slate-900">

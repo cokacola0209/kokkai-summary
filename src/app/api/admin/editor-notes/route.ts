@@ -3,9 +3,29 @@ import { prisma } from "@/lib/prisma";
 import { generateDailyEditorNote } from "@/lib/editor-note/generateDailyEditorNote";
 
 // ──────────────────────────────────────────
+// 認証チェック
+// ──────────────────────────────────────────
+function checkAuth(request: Request): boolean {
+  const password = process.env.ADMIN_PASSWORD;
+  if (!password) return true; // 未設定なら認証なし（後方互換）
+
+  const key = request.headers.get("x-admin-key") ?? "";
+  return key === password;
+}
+
+function unauthorizedResponse() {
+  return NextResponse.json(
+    { error: "認証エラー: パスワードが正しくありません" },
+    { status: 401 }
+  );
+}
+
+// ──────────────────────────────────────────
 // GET: 一覧取得
 // ──────────────────────────────────────────
-export async function GET() {
+export async function GET(request: Request) {
+  if (!checkAuth(request)) return unauthorizedResponse();
+
   const notes = await prisma.dailyEditorNote.findMany({
     orderBy: { targetDate: "desc" },
     take: 60,
@@ -27,6 +47,8 @@ export async function GET() {
 // POST: 新規作成（AI下書き生成）
 // ──────────────────────────────────────────
 export async function POST(request: Request) {
+  if (!checkAuth(request)) return unauthorizedResponse();
+
   try {
     const body = await request.json();
     const { targetDate } = body;
@@ -38,35 +60,31 @@ export async function POST(request: Request) {
       );
     }
 
-    const date = new Date(targetDate);
-    if (isNaN(date.getTime())) {
+    const parts = targetDate.split("-").map(Number);
+    if (parts.length !== 3 || parts.some(isNaN)) {
       return NextResponse.json(
-        { error: "日付の形式が正しくありません" },
+        { error: "日付の形式が正しくありません（例: 2026-03-10）" },
         { status: 400 }
       );
     }
 
-    // その日の会議件数をチェック
-    const dayStart = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-    const dayEnd = new Date(dayStart);
-    dayEnd.setDate(dayEnd.getDate() + 1);
+    const dayStart = new Date(Date.UTC(parts[0], parts[1] - 1, parts[2]));
 
     const meetingCount = await prisma.meeting.count({
-        where: { date: dayStart },
-      });
+      where: { date: dayStart },
+    });
 
     if (meetingCount === 0) {
       return NextResponse.json(
         {
-          error: `${dayStart.toLocaleDateString("ja-JP")} の会議データがありません。先に会議データを取得してください。`,
+          error: `${parts[0]}年${parts[1]}月${parts[2]}日の会議データがありません。先に会議データを取得してください。`,
           meetingCount: 0,
         },
         { status: 404 }
       );
     }
 
-    // AI下書き生成（既存のgenerateDailyEditorNote をそのまま使う）
-    const note = await generateDailyEditorNote(date);
+    const note = await generateDailyEditorNote(dayStart);
 
     if (!note) {
       return NextResponse.json(
@@ -97,6 +115,8 @@ export async function POST(request: Request) {
 // PUT: 既存レコード更新
 // ──────────────────────────────────────────
 export async function PUT(request: Request) {
+  if (!checkAuth(request)) return unauthorizedResponse();
+
   const body = await request.json();
   const { id, title, introText, editedText, status } = body;
 
