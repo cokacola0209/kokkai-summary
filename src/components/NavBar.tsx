@@ -74,6 +74,13 @@ export function NavBar() {
                   会議一覧
                 </Link>
                 <Link
+                  href="/bills"
+                  className="flex items-center gap-2.5 px-4 py-2.5 text-sm text-slate-700 transition-colors hover:bg-slate-50"
+                >
+                  <span className="text-base">📜</span>
+                  法案一覧
+                </Link>
+                <Link
                   href="/"
                   className="flex items-center gap-2.5 px-4 py-2.5 text-sm text-slate-700 transition-colors hover:bg-slate-50"
                 >

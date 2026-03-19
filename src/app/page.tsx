@@ -10,7 +10,7 @@ import {
   StatCard,
 } from "@/components/ui";
 import { EditorNoteCard } from "@/components/EditorNoteCard";
-
+import { BillsPreviewCard } from "@/components/BillCard";
 export const revalidate = 0;
 
 const CATEGORY_KEYWORDS: Record<string, string[]> = {
@@ -453,6 +453,26 @@ export default async function HomePage() {
 
   const partyBalance = await getPartyBalance();
 
+  const partyBalance = await getPartyBalance();
+
+// ↓↓↓ ここから追加 ↓↓↓
+const recentBills = await prisma.bill.findMany({
+  orderBy: [
+    { enactedAt: { sort: "desc", nulls: "last" } },
+    { passedAt: { sort: "desc", nulls: "last" } },
+    { submittedAt: { sort: "desc", nulls: "last" } },
+  ],
+  take: 5,
+  select: {
+    billCode: true,
+    title: true,
+    status: true,
+  },
+});
+// ↑↑↑ ここまで追加 ↑↑↑
+
+return (
+
   return (
     <>
       <NewsArticleJsonLd date={date} meetingCount={meetings.length} />
@@ -476,6 +496,8 @@ export default async function HomePage() {
 
         {/* 管理者まとめ */}
         <EditorNoteCard />
+
+        <BillsPreviewCard bills={recentBills} />
 
         {/* ── 統計バー ── */}
         <div className="mb-8 grid grid-cols-2 gap-3 fade-in-up delay-1 sm:grid-cols-4">

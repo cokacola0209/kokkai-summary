@@ -10,6 +10,7 @@ import {
   SourceLinks,
   HighlightBox,
 } from "@/components/ui";
+import { BillMiniCard } from "@/components/BillCard";
 
 export const revalidate = 3600;
 export const dynamic = "force-dynamic";
@@ -50,6 +51,11 @@ async function getMeeting(id: string) {
     include: {
       summary: true,
       speeches: { orderBy: { order: "asc" } },
+      bills: {
+        include: {
+          bill: true,
+        },
+      },
     },
   });
   return meeting;
@@ -1015,6 +1021,23 @@ export default async function MeetingDetailPage({
                     </div>
                   </div>
                 )}
+              </Section>
+            )}
+
+            {/* ── この会議に関連する法案 ── */}
+            {meeting.bills && meeting.bills.length > 0 && (
+              <Section title="この会議に関連する法案" icon="📜">
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {meeting.bills.map((bm) => (
+                    <BillMiniCard
+                      key={bm.id}
+                      billCode={bm.bill.billCode}
+                      title={bm.bill.title}
+                      status={bm.bill.status}
+                      relation={bm.relation}
+                    />
+                  ))}
+                </div>
               </Section>
             )}
 
