@@ -60,7 +60,41 @@
  }
 
  // ──────────────────────────────────────────
- // BillCard — 法案一覧用カード
+ // テーマ分類
+ // ──────────────────────────────────────────
+
+ export const BILL_THEMES: Record<string, string[]> = {
+   "経済・財政": ["予算", "税", "財政", "経済", "金融", "減税", "賃金", "物価"],
+   "社会保障・医療": ["医療", "介護", "保険", "年金", "療養", "社会保障", "福祉"],
+   "子育て・教育": ["子ども", "子育て", "教育", "学校", "大学", "奨学金", "保育", "児童", "少子化"],
+   "外交・防衛": ["防衛", "安全保障", "外交", "装備", "自衛"],
+   "政治改革": ["政治資金", "選挙", "政治改革", "規正"],
+   "エネルギー・環境": ["エネルギー", "再生可能", "電力", "脱炭素", "環境", "太陽電池"],
+   "デジタル・技術": ["AI", "デジタル", "マイナンバー", "情報", "技術"],
+   "農業・食料": ["農業", "食料", "農村", "農家", "食料安全保障"],
+   "法務・人権": ["民法", "刑法", "夫婦別姓", "人権"],
+ };
+
+ export function getBillTheme(title: string, summary: string): string | null {
+   const text = `${title} ${summary}`;
+   for (const [theme, keywords] of Object.entries(BILL_THEMES)) {
+     if (keywords.some((kw) => text.includes(kw))) {
+       return theme;
+     }
+   }
+   return null;
+ }
+
+ /** 提出元を billCode から判定 */
+ export function getSubmitterType(billCode: string): string {
+   if (billCode.includes("閣法")) return "閣法";
+   if (billCode.includes("衆法")) return "衆法";
+   if (billCode.includes("参法")) return "参法";
+   return "その他";
+ }
+
+ // ──────────────────────────────────────────
+ // BillCard — 法案一覧用カード（折りたたみ式）
  // ──────────────────────────────────────────
 
  interface BillCardProps {
@@ -86,7 +120,6 @@
    passedAt,
    enactedAt,
  }: BillCardProps) {
-   // 最も重要な日付を表示
    const displayDate = enactedAt ?? passedAt ?? submittedAt;
    const dateStr = displayDate
      ? displayDate.toLocaleDateString("ja-JP", {
@@ -96,56 +129,68 @@
        })
      : "";
 
-   const dateLabel =
-     enactedAt
-       ? "成立"
-       : passedAt
-         ? "可決"
-         : "提出";
+   const dateLabel = enactedAt ? "成立" : passedAt ? "可決" : "提出";
+   const theme = getBillTheme(title, summary);
 
    return (
-     <div className="group rounded-2xl border border-slate-200 bg-white p-4 transition-all duration-150 hover:border-blue-300 hover:shadow-sm sm:p-5">
-       {/* 上段: ステータス + 院 + 法案番号 */}
-       <div className="mb-3 flex flex-wrap items-center gap-2">
-         <BillStatusBadge status={status} />
-         {house && (
-           <span
-             className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
-               house === "衆議院"
-                 ? "bg-blue-100 text-blue-800 border border-blue-200"
-                 : "bg-green-100 text-green-800 border border-green-200"
-             }`}
-           >
-             {house}
+     <details className="group overflow-hidden rounded-2xl border border-slate-200 bg-white transition-shadow hover:shadow-sm">
+       {/* 閉じた状態: ステータス + 法案名 */}
+       <summary className="flex cursor-pointer list-none items-center gap-3 px-4 py-3.5 transition-colors hover:bg-slate-50 [&::-webkit-details-marker]:hidden">
+         <div className="flex min-w-0 flex-1 items-center gap-2.5">
+           <BillStatusBadge status={status} />
+           <span className="min-w-0 truncate text-sm font-bold text-slate-800">
+             {title}
            </span>
+         </div>
+         <svg
+           className="h-4 w-4 shrink-0 text-slate-400 transition-transform duration-200 group-open:rotate-180"
+           fill="none"
+           viewBox="0 0 24 24"
+           stroke="currentColor"
+           strokeWidth={2}
+         >
+           <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+         </svg>
+       </summary>
+
+       {/* 開いた状態: 詳細情報 */}
+       <div className="border-t border-slate-100 px-4 pb-4 pt-3">
+         <div className="mb-3 flex flex-wrap items-center gap-2">
+           {house && (
+             <span
+               className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                 house === "衆議院"
+                   ? "bg-blue-100 text-blue-800 border border-blue-200"
+                   : "bg-green-100 text-green-800 border border-green-200"
+               }`}
+             >
+               {house}
+             </span>
+           )}
+           <span className="text-xs text-slate-400">{billCode}</span>
+           {theme && (
+             <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-500">
+               {theme}
+             </span>
+           )}
+         </div>
+
+         {summary && (
+           <p className="text-sm leading-relaxed text-slate-600">{summary}</p>
          )}
-         <span className="text-xs text-slate-400">{billCode}</span>
+
+         {dateStr && (
+           <p className="mt-3 text-xs text-slate-400">
+             {dateLabel}: {dateStr}
+           </p>
+         )}
        </div>
-
-       {/* 法案名 */}
-       <h3 className="text-sm font-bold leading-snug text-slate-800 sm:text-base">
-         {title}
-       </h3>
-
-       {/* 概要 */}
-       {summary && (
-         <p className="mt-2 line-clamp-3 text-sm leading-relaxed text-slate-600">
-           {summary}
-         </p>
-       )}
-
-       {/* 下段: 日付 */}
-       {dateStr && (
-         <p className="mt-3 text-xs text-slate-400">
-           {dateLabel}: {dateStr}
-         </p>
-       )}
-     </div>
+     </details>
    );
  }
 
  // ──────────────────────────────────────────
- // BillMiniCard — 会議詳細の関連法案表示用（コンパクト版）
+ // BillMiniCard — 会議詳細の関連法案表示用
  // ──────────────────────────────────────────
 
  interface BillMiniCardProps {
@@ -212,9 +257,7 @@
        <div className="mb-4 flex items-center justify-between">
          <div className="flex items-center gap-2">
            <span className="text-base">📜</span>
-           <h2 className="text-base font-bold text-slate-800">
-             最近の法案
-           </h2>
+           <h2 className="text-base font-bold text-slate-800">最近の法案</h2>
          </div>
          <Link
            href="/bills"

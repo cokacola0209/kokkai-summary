@@ -495,7 +495,7 @@ return (
         {/* 管理者まとめ */}
         <EditorNoteCard />
 
-        <BillsPreviewCard bills={recentBills} />
+
 
         {/* ── 統計バー ── */}
         <div className="mb-8 grid grid-cols-2 gap-3 fade-in-up delay-1 sm:grid-cols-4">
@@ -772,6 +772,7 @@ return (
                 ))}
               </div>
             </Section>
+            <BillsPreviewCard bills={recentBills} />
           </div>
 
           {/* ── サイドバー ── */}
