@@ -232,7 +232,15 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Sea
   const [totalAll, total, meetings, houses, filterOptions, yearMonths, todayMeetings] = await Promise.all([
     prisma.meeting.count(),
     prisma.meeting.count({ where }),
-
+    prisma.meeting.findMany({
+      where,
+      orderBy: { date: "desc" },
+      skip: (page - 1) * PAGE_SIZE,
+      take: PAGE_SIZE,
+      include: { summary: { select: { agreementPoints: true, conflictPoints: true, keyTopics: true } } },
+    }),
+    prisma.meeting.groupBy({ by: ["house"], _count: true, orderBy: { _count: { house: "desc" } } }),
+    getFilterOptions(),
     getAvailableYearMonths(),
     getTodayMeetings(),
   ]);
