@@ -473,7 +473,6 @@ const recentBills = await prisma.bill.findMany({
 
 return (
 
-  return (
     <>
       <NewsArticleJsonLd date={date} meetingCount={meetings.length} />
 
