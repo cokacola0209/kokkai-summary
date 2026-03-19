@@ -25,6 +25,7 @@ model Meeting {
   updatedAt     DateTime @updatedAt
   speeches      Speech[]
   summary       Summary?
+  bills        BillMeeting[]
   @@index([date])
   @@index([house])
 }
@@ -145,4 +146,44 @@ model DailyEditorNote {
   publishedAt      DateTime?
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
+}
+// ──────────────────────────────────────────
+// 新規: 法案
+// ──────────────────────────────────────────
+
+model Bill {
+  id          String    @id @default(cuid())
+  billCode    String    @unique
+  title       String
+  summary     String    @default("")
+  status      String    @default("submitted")
+  house       String?
+  submittedAt DateTime? @db.Date
+  passedAt    DateTime? @db.Date
+  enactedAt   DateTime? @db.Date
+  rawSource   String    @default("")
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  meetings    BillMeeting[]
+
+  @@index([status])
+  @@index([passedAt])
+  @@index([enactedAt])
+}
+
+model BillMeeting {
+  id         String   @id @default(cuid())
+  billId     String
+  meetingId  String
+  relation   String   @default("related")
+  createdAt  DateTime @default(now())
+
+  bill       Bill     @relation(fields: [billId], references: [id], onDelete: Cascade)
+  meeting    Meeting  @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+
+  @@unique([billId, meetingId])
+  @@index([meetingId])
+  @@index([billId])
+  @@index([relation])
 }
