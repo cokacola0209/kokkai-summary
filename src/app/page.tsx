@@ -539,15 +539,15 @@ return (
           key={i}
           className={`flex gap-3 rounded-lg border p-3 text-sm ${
             h.type === "conflict"
-              ? "border-red-100 bg-red-50/60"
-              : "border-amber-100 bg-amber-50/60"
+              ? "border-red-100 bg-red-50/40"
+              : "border-amber-100 bg-amber-50/40"
           }`}
         >
           <span className="mt-0.5 shrink-0">
             {h.type === "conflict" ? "⚖️" : "🔍"}
           </span>
           <div className="min-w-0">
-            <p className="leading-relaxed text-slate-700 break-words">{h.text}</p>
+            <p className="leading-relaxed text-slate-600 break-words">{h.text}</p>
             <p className="mt-1 text-xs text-slate-400">{h.meeting}</p>
           </div>
         </div>
@@ -611,14 +611,14 @@ return (
         </div>
       </div>
 
-      <div className="mt-4">
-        <p className="text-xs font-medium text-slate-400">分野</p>
+      <div className="mt-4 rounded-lg bg-slate-50/60 p-3">
+        <p className="text-xs font-semibold text-slate-500">分野</p>
         <div className="mt-2 flex flex-wrap gap-2">
           {categoryLinks.map((item) => (
             <Link
               key={item.label}
               href={item.href}
-              className="inline-flex items-center rounded-full border border-slate-200 bg-white px-3 py-1 text-xs text-slate-600 transition-colors hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
+              className="inline-flex items-center rounded-full border border-slate-200 bg-white px-3.5 py-1.5 text-xs text-slate-600 transition-colors hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
             >
               {item.label}
             </Link>
@@ -730,11 +730,11 @@ return (
       <ul className="space-y-2">
         {topAgreementItems.map((a, i) => (
           <li key={i} className="flex gap-2 text-sm">
-            <span className="mt-0.5 shrink-0 font-medium text-green-500">
+            <span className="mt-0.5 shrink-0 font-medium text-green-400">
               ▸
             </span>
             <div className="min-w-0">
-              <span className="text-slate-700 break-words">{a.text}</span>
+              <span className="text-slate-600 break-words">{a.text}</span>
               <span className="ml-2 text-xs text-slate-400">
                 [{a.meeting}]
               </span>
