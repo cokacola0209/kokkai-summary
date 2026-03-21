@@ -36,7 +36,7 @@ export async function EditorNoteCard() {
         </p>
       )}
 
-      <p className="text-sm leading-relaxed text-slate-600 whitespace-pre-wrap">
+      <p className="text-sm leading-relaxed text-slate-600 whitespace-pre-wrap break-words">
         {note.editedText}
       </p>
 

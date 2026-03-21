@@ -476,7 +476,7 @@ return (
     <>
       <NewsArticleJsonLd date={date} meetingCount={meetings.length} />
 
-      <div className="mx-auto max-w-5xl px-4 py-8">
+      <div className="mx-auto max-w-5xl px-3 py-5 sm:px-4 sm:py-8">
         {/* ── ヘッダ ── */}
         <div className="mb-6 fade-in">
           <p className="mb-1 text-sm text-slate-400">
@@ -527,7 +527,7 @@ return (
           <BeginnerGuide />
         </div>
 
-        <div className="grid gap-8 lg:grid-cols-3">
+        <div className="grid grid-cols-1 gap-8 lg:grid-cols-3">
           {/* ── メインカラム ── */}
           <div className="space-y-6 lg:col-span-2">
             {/* 本日の注目ポイント */}
@@ -546,8 +546,8 @@ return (
           <span className="mt-0.5 shrink-0">
             {h.type === "conflict" ? "⚖️" : "🔍"}
           </span>
-          <div>
-            <p className="leading-relaxed text-slate-700">{h.text}</p>
+          <div className="min-w-0">
+            <p className="leading-relaxed text-slate-700 break-words">{h.text}</p>
             <p className="mt-1 text-xs text-slate-400">{h.meeting}</p>
           </div>
         </div>
@@ -569,8 +569,8 @@ return (
 
             {/* ── いま注目の入口 ── */}
 <section className="mb-6 fade-in-up delay-3">
-  <div className="mb-3 flex items-end justify-between gap-3">
-    <div>
+  <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
+    <div className="min-w-0">
       <h2 className="text-xl font-bold text-slate-900">
         いま注目の入口
       </h2>
@@ -586,7 +586,7 @@ return (
     </Link>
   </div>
 
-  <div className="grid gap-4 lg:grid-cols-3">
+  <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
     {/* テーマ・分野 */}
     <div className="card lg:col-span-2">
       <p className="text-sm font-semibold text-slate-800">
@@ -656,7 +656,7 @@ return (
               <Link
                 key={name}
                 href={`/meetings?person=${encodeURIComponent(name)}`}
-                className="inline-flex whitespace-nowrap items-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs text-slate-600 transition-colors hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
+                className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs text-slate-600 transition-colors hover:border-blue-200 hover:bg-blue-50 hover:text-blue-700"
               >
                 {name}
               </Link>
@@ -733,8 +733,8 @@ return (
             <span className="mt-0.5 shrink-0 font-medium text-green-500">
               ▸
             </span>
-            <div>
-              <span className="text-slate-700">{a.text}</span>
+            <div className="min-w-0">
+              <span className="text-slate-700 break-words">{a.text}</span>
               <span className="ml-2 text-xs text-slate-400">
                 [{a.meeting}]
               </span>
@@ -777,7 +777,7 @@ return (
                         {m.summary.bullets.slice(0, 3).map((b, j) => (
                           <li key={j} className="text-sm text-slate-600 flex gap-2">
                             <span className="text-blue-400 mt-0.5 shrink-0">•</span>
-                            <span className="line-clamp-2">{b}</span>
+                            <span className="line-clamp-2 min-w-0">{b}</span>
                           </li>
                         ))}
                       </ul>
@@ -848,11 +848,8 @@ return (
               </div>
             </div>
 
+            {/* ★ 修正: Link の入れ子を解消 → 2つの独立した Link に分離 */}
             <Link
-              href="/meetings"
-              className="block card text-center hover:border-blue-300"
-            >
-              <Link
               href="/daily"
               className="block card text-center hover:border-blue-300"
             >
@@ -860,6 +857,10 @@ return (
                 📅 過去の日にち別まとめを見る →
               </p>
             </Link>
+            <Link
+              href="/meetings"
+              className="block card text-center hover:border-blue-300"
+            >
               <p className="text-sm font-medium text-blue-600">
                 📚 過去の会議一覧を見る →
               </p>

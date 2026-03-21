@@ -62,7 +62,7 @@ export function Accordion({
               )}
             </div>
             {subtitle && (
-              <div className="mt-1.5">{typeof subtitle === "string" ? (
+              <div className="mt-1.5 min-w-0 whitespace-normal break-words [overflow-wrap:anywhere]">{typeof subtitle === "string" ? (
                 <span className="text-xs text-slate-500">{subtitle}</span>
               ) : (
                 subtitle
@@ -89,8 +89,6 @@ export function Accordion({
 }
 
 /* ── サーバーコンポーネント用 details スタイル ── */
-/* meetings/page.tsx など Server Component では <details> を使い続けるため、
-   見た目だけ統一するためのラッパーコンポーネント */
 export function AccordionDetails({
   title,
   subtitle,
@@ -130,7 +128,7 @@ export function AccordionDetails({
               )}
             </div>
             {subtitle && (
-              <div className="mt-1.5">{typeof subtitle === "string" ? (
+              <div className="mt-1.5 min-w-0 whitespace-normal break-words [overflow-wrap:anywhere]">{typeof subtitle === "string" ? (
                 <span className="text-xs text-slate-500">{subtitle}</span>
               ) : (
                 subtitle
