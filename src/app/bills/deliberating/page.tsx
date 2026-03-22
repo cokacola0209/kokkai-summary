@@ -9,13 +9,14 @@ export const dynamic = "force-dynamic";
 const PER_PAGE = 15;
 
 export const metadata: Metadata = {
-  title: "国会で決まった法案 – 国会ラボ",
+  title: "審議中の法案 – 国会ラボ",
   description:
-    "国会で成立・可決された法案の一覧です。どんな法律が決まったのか、テーマや年別で確認できます。",
+    "国会で現在審議されている法案や、提出された法案の一覧です。今なにが議論されているかを確認できます。",
 };
 
 // ──────────────────────────────────────────
 // フィルタ定義
+// ※ /bills/page.tsx と同一定義（将来の共通化候補）
 // ──────────────────────────────────────────
 
 // テーマ一覧（フィルタ用）
@@ -32,39 +33,33 @@ const SUBMITTER_OPTIONS = [
 // データ取得
 // ──────────────────────────────────────────
 
-/** DB 内の成立・可決法案から年の候補を動的に取得 */
+/** DB 内の審議中・提出法案から年の候補を動的に取得 */
 async function getAvailableYears(): Promise<number[]> {
   const bills = await prisma.bill.findMany({
-    where: { status: { in: ["enacted", "passed"] } },
-    select: { enactedAt: true, passedAt: true },
+    where: { status: { in: ["deliberating", "submitted"] } },
+    select: { submittedAt: true },
   });
   const years = new Set<number>();
   for (const b of bills) {
-    const d = b.enactedAt ?? b.passedAt;
-    if (d) years.add(d.getFullYear());
+    if (b.submittedAt) years.add(b.submittedAt.getFullYear());
   }
   return Array.from(years).sort((a, b) => b - a);
 }
 
 async function getBills(year?: number) {
   const where: Record<string, unknown> = {
-    status: { in: ["enacted", "passed"] },
+    status: { in: ["deliberating", "submitted"] },
   };
 
   if (year) {
     const start = new Date(`${year}-01-01`);
     const end = new Date(`${year + 1}-01-01`);
-    where.OR = [
-      { enactedAt: { gte: start, lt: end } },
-      { passedAt: { gte: start, lt: end } },
-    ];
+    where.submittedAt = { gte: start, lt: end };
   }
 
   return prisma.bill.findMany({
     where,
     orderBy: [
-      { enactedAt: { sort: "desc", nulls: "last" } },
-      { passedAt: { sort: "desc", nulls: "last" } },
       { submittedAt: { sort: "desc", nulls: "last" } },
       { billCode: "desc" },
     ],
@@ -77,11 +72,11 @@ async function getBills(year?: number) {
 }
 
 async function getBillStats() {
-  const [enacted, passed] = await Promise.all([
-    prisma.bill.count({ where: { status: "enacted" } }),
-    prisma.bill.count({ where: { status: "passed" } }),
+  const [deliberating, submitted] = await Promise.all([
+    prisma.bill.count({ where: { status: "deliberating" } }),
+    prisma.bill.count({ where: { status: "submitted" } }),
   ]);
-  return { total: enacted + passed, enacted, passed };
+  return { total: deliberating + submitted, deliberating, submitted };
 }
 
 // ──────────────────────────────────────────
@@ -97,7 +92,7 @@ interface Props {
   };
 }
 
-export default async function BillsPage({ searchParams }: Props) {
+export default async function DeliberatingBillsPage({ searchParams }: Props) {
   const activeYear = searchParams?.year ?? "";
   const activeTheme = searchParams?.theme ?? "";
   const activeSubmitter = searchParams?.submitter ?? "";
@@ -113,12 +108,10 @@ export default async function BillsPage({ searchParams }: Props) {
 
   // ── フィルタ件数の計算（クロスフィルタ） ──
 
-  // year+submitter 適用済み → テーマ件数計算用
   const billsForThemeCount = activeSubmitter
     ? allBills.filter((b) => getSubmitterType(b.billCode) === activeSubmitter)
     : allBills;
 
-  // year+theme 適用済み → 提出元件数計算用
   const billsForSubmitterCount = activeTheme
     ? (() => {
         const kw = BILL_THEMES[activeTheme];
@@ -175,7 +168,6 @@ export default async function BillsPage({ searchParams }: Props) {
   const pagedBills = bills.slice(startIndex, startIndex + PER_PAGE);
 
   // ── URL構築ヘルパー ──
-  // フィルタ変更 → page リセット / ページ移動 → フィルタ維持
   function buildFilterHref(overrides: Record<string, string>) {
     const params = new URLSearchParams();
     const merged = {
@@ -187,7 +179,7 @@ export default async function BillsPage({ searchParams }: Props) {
     if (merged.year) params.set("year", merged.year);
     if (merged.theme) params.set("theme", merged.theme);
     if (merged.submitter) params.set("submitter", merged.submitter);
-    return `/bills${params.toString() ? `?${params}` : ""}`;
+    return `/bills/deliberating${params.toString() ? `?${params}` : ""}`;
   }
 
   function buildPageHref(page: number) {
@@ -196,7 +188,7 @@ export default async function BillsPage({ searchParams }: Props) {
     if (activeTheme) params.set("theme", activeTheme);
     if (activeSubmitter) params.set("submitter", activeSubmitter);
     if (page > 1) params.set("page", String(page));
-    return `/bills${params.toString() ? `?${params}` : ""}`;
+    return `/bills/deliberating${params.toString() ? `?${params}` : ""}`;
   }
 
   const isFiltered = !!activeYear || !!activeTheme || !!activeSubmitter;
@@ -208,31 +200,35 @@ export default async function BillsPage({ searchParams }: Props) {
         <Link href="/" className="transition hover:text-slate-600">
           ホーム
         </Link>{" "}
-        / <span className="text-slate-600">国会で決まった法案</span>
+        /{" "}
+        <Link href="/bills" className="transition hover:text-slate-600">
+          国会で決まった法案
+        </Link>{" "}
+        / <span className="text-slate-600">審議中の法案</span>
       </nav>
 
       {/* ── ヘッダ ── */}
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-slate-900">
-          📜 国会で決まった法案
+          🔍 審議中の法案
         </h1>
         <p className="mt-2 text-sm text-slate-500">
-          国会で成立・可決された法案をまとめています。
-          成立した法律は、私たちの暮らしに直接関わるものも多くあります。
+          国会に提出され、現在審議が進められている法案の一覧です。
+          今後の動向に注目です。
         </p>
         <Link
-          href="/bills/deliberating"
-          className="mt-3 flex items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-4 py-2.5 text-sm font-medium text-blue-700 transition-colors hover:bg-blue-100 hover:border-blue-300"
+          href="/bills"
+          className="mt-3 flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm font-medium text-slate-600 transition-colors hover:bg-blue-50 hover:text-blue-700 hover:border-blue-200"
         >
-          🔍 審議中・提出済みの法案はこちら
-          <span className="ml-auto text-blue-400">→</span>
+          📜 成立・可決された法案はこちら
+          <span className="ml-auto text-slate-400">→</span>
         </Link>
       </div>
 
       {/* ── 統計カード ── */}
       <div className="mb-6 grid grid-cols-2 gap-2 sm:gap-3">
-        <StatMini label="成立" value={stats.enacted} emoji="✅" />
-        <StatMini label="可決" value={stats.passed} emoji="🟢" />
+        <StatMini label="審議中" value={stats.deliberating} emoji="🟡" />
+        <StatMini label="提出" value={stats.submitted} emoji="📝" />
       </div>
 
       {/* ── 初見向け解説 ── */}
@@ -241,16 +237,16 @@ export default async function BillsPage({ searchParams }: Props) {
         headerLeft={<span className="text-base">📖</span>}
       >
         <div className="grid gap-3 sm:grid-cols-2">
-          <div className="rounded-lg bg-blue-50/60 p-3">
-            <p className="text-xs font-semibold text-blue-700 mb-1">🟢 可決</p>
+          <div className="rounded-lg bg-slate-50 p-3">
+            <p className="text-xs font-semibold text-slate-700 mb-1">📝 提出</p>
             <p className="text-sm text-slate-600">
-              衆議院または参議院の片方で可決された段階です。もう一方の院でも審議・可決される必要があります。
+              内閣または議員が国会に法案を出した段階です。まだ本格的な審議には入っていません。
             </p>
           </div>
-          <div className="rounded-lg bg-green-50/60 p-3">
-            <p className="text-xs font-semibold text-green-700 mb-1">✅ 成立</p>
+          <div className="rounded-lg bg-amber-50/60 p-3">
+            <p className="text-xs font-semibold text-amber-700 mb-1">🟡 審議中</p>
             <p className="text-sm text-slate-600">
-              両院で可決されて法律として成立した状態です。公布・施行を経て実際に効力を持ちます。
+              委員会や本会議で議論されている段階です。修正が入ったり、参考人の意見を聞いたりします。
             </p>
           </div>
         </div>
@@ -261,7 +257,7 @@ export default async function BillsPage({ searchParams }: Props) {
         {/* 年別フィルタ */}
         {availableYears.length > 0 && (
           <div>
-            <p className="mb-1.5 text-xs font-medium text-slate-400">年で絞り込み</p>
+            <p className="mb-1.5 text-xs font-medium text-slate-400">提出年で絞り込み</p>
             <div className="flex flex-wrap gap-2">
               <Link
                 href={buildFilterHref({ year: "" })}
@@ -364,7 +360,7 @@ export default async function BillsPage({ searchParams }: Props) {
         </p>
         {isFiltered && (
           <Link
-            href="/bills"
+            href="/bills/deliberating"
             className="text-xs text-blue-600 hover:text-blue-700"
           >
             フィルタをリセット
@@ -438,9 +434,8 @@ export default async function BillsPage({ searchParams }: Props) {
           <span>⚠️</span> ご注意
         </p>
         <p className="text-sm leading-relaxed text-amber-700">
-          このページでは成立・可決された法案を中心に掲載しています。
           法案の概要はAIによる要約です。正確な内容については、国会会議録や官報など一次情報をご確認ください。
-          法案データは随時更新されますが、最新の情報とは異なる場合があります。
+          審議状況は随時更新されますが、最新の情報とは異なる場合があります。
         </p>
       </div>
     </div>
@@ -449,7 +444,7 @@ export default async function BillsPage({ searchParams }: Props) {
 
 // ──────────────────────────────────────────
 // 統計ミニカード
-// ※ 将来の共通化候補（deliberating/page.tsx にも同定義あり）
+// ※ 将来の共通化候補（/bills/page.tsx にも同定義あり）
 // ──────────────────────────────────────────
 
 function StatMini({

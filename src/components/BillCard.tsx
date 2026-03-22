@@ -155,6 +155,7 @@
 
        {/* 開いた状態: 詳細情報 */}
        <div className="border-t border-slate-100 px-4 pb-4 pt-3">
+       <p className="mb-2 text-sm font-bold text-slate-800">{title}</p>
          <div className="mb-3 flex flex-wrap items-center gap-2">
            {house && (
              <span
@@ -175,9 +176,13 @@
            )}
          </div>
 
-         {summary && (
-           <p className="text-sm leading-relaxed text-slate-600">{summary}</p>
-         )}
+         {summary ? (
+  <p className="text-sm leading-relaxed text-slate-600">{summary}</p>
+) : (
+  <p className="text-xs italic text-slate-400">
+    ※ 概要は今後補足予定です。
+  </p>
+)}
 
          {dateStr && (
            <p className="mt-3 text-xs text-slate-400">
