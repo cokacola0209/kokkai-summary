@@ -12,6 +12,7 @@ import {
 } from "@/components/ui";
 import { EditorNoteCard } from "@/components/EditorNoteCard";
 import { BillsPreviewCard } from "@/components/BillCard";
+import { isValidPersonName } from "@/lib/person-utils";
 export const revalidate = 0;
 
 const CATEGORY_KEYWORDS: Record<string, string[]> = {
@@ -22,41 +23,6 @@ const CATEGORY_KEYWORDS: Record<string, string[]> = {
   防災: ["防災", "災害", "地震", "避難", "豪雨", "復旧", "インフラ"],
   政治改革: ["政治改革", "政治資金", "献金", "選挙", "裏金", "改革"],
 };
-
-const PERSON_PATTERN =
-  /([一-龯ぁ-んァ-ヶー々]{2,6}?)(?:副大臣|国務大臣|環境大臣|農林水産大臣|文部科学大臣|厚生労働大臣|経済産業大臣|国土交通大臣|防衛大臣|総務大臣|法務大臣|財務大臣|外務大臣|首相|総理大臣|総理|大臣|議員|委員長|参考人|長官|知事|市長|大統領|幹事長)/g;
-
-function isValidPersonKeyword(fullMatch: string): boolean {
-  const titleSuffixes = [
-    "副大臣", "国務大臣", "環境大臣", "農林水産大臣", "文部科学大臣",
-    "厚生労働大臣", "経済産業大臣", "国土交通大臣", "防衛大臣", "総務大臣",
-    "法務大臣", "財務大臣", "外務大臣", "首相", "総理大臣", "総理",
-    "大臣", "議員", "委員長", "参考人", "長官", "知事", "市長", "大統領", "幹事長",
-  ];
-
-  let nameOnly = fullMatch;
-  for (const suffix of titleSuffixes) {
-    if (nameOnly.endsWith(suffix)) {
-      nameOnly = nameOnly.slice(0, -suffix.length);
-      break;
-    }
-  }
-
-  if (nameOnly.length < 2) return false;
-  if (nameOnly.startsWith("対")) return false;
-
-  const nonNameWords = [
-    "環境", "国土", "交通", "農林", "水産", "文部", "科学",
-    "厚生", "労働", "経済", "産業", "国務", "内閣", "防衛",
-    "総務", "法務", "財務", "外務", "デジタル",
-    "自民党", "立憲", "公明党", "公明", "維新", "共産党", "共産",
-    "れいわ", "国民民主",
-    "政務官", "事務局", "参考人",
-  ];
-  if (nonNameWords.some((word) => nameOnly.includes(word))) return false;
-
-  return true;
-}
 
 export async function generateMetadata(): Promise<Metadata> {
   const latestDate = await prisma.meeting.findFirst({
@@ -220,44 +186,52 @@ const PRIORITY_PEOPLE = [
   "岩屋毅",
 ];
 
-function extractPeopleKeywords(
-  meetings: Awaited<ReturnType<typeof getLatestMeetings>>["meetings"]
-): string[] {
-  const counts = new Map<string, number>();
+async function getPeopleKeywords(date: Date): Promise<string[]> {
+  const persons = await prisma.person.findMany({
+    where: {
+      speeches: {
+        some: {
+          meeting: {
+            date,
+          },
+        },
+      },
+    },
+    include: {
+      speeches: {
+        where: {
+          meeting: {
+            date,
+          },
+        },
+        select: {
+          id: true,
+        },
+      },
+    },
+  });
 
-  for (const m of meetings) {
-    const texts = [
-      m.nameOfMeeting,
-      ...(m.summary?.bullets ?? []),
-      ...(m.summary?.agreementPoints ?? []),
-      ...(m.summary?.conflictPoints ?? []),
-      ...(m.summary?.impactNotes ?? []),
-    ];
-
-    for (const text of texts) {
-      const matches = text.match(PERSON_PATTERN) ?? [];
-      matches.forEach((name) => {
-        if (isValidPersonKeyword(name)) {
-          counts.set(name, (counts.get(name) ?? 0) + 1);
-        }
-      });
-    }
-  }
-
-  return Array.from(counts.entries())
+  return persons
+    .map((p) => ({
+      name: p.name,
+      count: p.speeches.length,
+    }))
+    .filter((p) => p.name && p.name.trim().length > 0 && isValidPersonName(p.name))
     .sort((a, b) => {
-      const aPriority = PRIORITY_PEOPLE.indexOf(a[0]);
-      const bPriority = PRIORITY_PEOPLE.indexOf(b[0]);
+      const aPriority = PRIORITY_PEOPLE.indexOf(a.name);
+      const bPriority = PRIORITY_PEOPLE.indexOf(b.name);
       const aIsPriority = aPriority !== -1;
       const bIsPriority = bPriority !== -1;
+
       if (aIsPriority && bIsPriority) return aPriority - bPriority;
       if (aIsPriority) return -1;
       if (bIsPriority) return 1;
-      if (b[1] !== a[1]) return b[1] - a[1];
-      return a[0].localeCompare(b[0], "ja");
+      if (b.count !== a.count) return b.count - a.count;
+
+      return a.name.localeCompare(b.name, "ja");
     })
     .slice(0, 24)
-    .map(([name]) => name);
+    .map((p) => p.name);
 }
 
 async function getRecentTopics(): Promise<string[]> {
@@ -440,7 +414,7 @@ export default async function HomePage() {
   const topTopics = aggregateTopics(meetings);
   const agreements = aggregateAgreements(meetings);
   const highlights = aggregateHighlights(meetings);
-  const peopleKeywords = extractPeopleKeywords(meetings);
+  const peopleKeywords = await getPeopleKeywords(date);
 
   const allTopics = await getRecentTopics();
   const categoryLinks = buildCategoryLinks(topTopics, allTopics);

@@ -77,11 +77,8 @@ async function getBills(year?: number) {
 }
 
 async function getBillStats() {
-  const [enacted, passed] = await Promise.all([
-    prisma.bill.count({ where: { status: "enacted" } }),
-    prisma.bill.count({ where: { status: "passed" } }),
-  ]);
-  return { total: enacted + passed, enacted, passed };
+  const enacted = await prisma.bill.count({ where: { status: "enacted" } });
+  return { total: enacted, enacted };
 }
 
 // ──────────────────────────────────────────
@@ -230,9 +227,8 @@ export default async function BillsPage({ searchParams }: Props) {
       </div>
 
       {/* ── 統計カード ── */}
-      <div className="mb-6 grid grid-cols-2 gap-2 sm:gap-3">
+      <div className="mb-6">
         <StatMini label="成立" value={stats.enacted} emoji="✅" />
-        <StatMini label="可決" value={stats.passed} emoji="🟢" />
       </div>
 
       {/* ── 初見向け解説 ── */}

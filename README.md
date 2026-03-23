@@ -95,7 +95,7 @@ Vercel 環境変数に `CRON_SECRET`・`DATABASE_URL`・`LLM_PROVIDER`・API キ
 ├── src/
 │   ├── app/
 │   │   ├── layout.tsx
-│   │   ├── page.tsx                    # / (今日の3分まとめ)
+│   │   ├── page.tsx                    # / (直近の3分まとめ)
 │   │   ├── meetings/
 │   │   │   ├── page.tsx                # /meetings (一覧)
 │   │   │   └── [id]/page.tsx           # /meetings/[id] (詳細)
@@ -121,3 +121,104 @@ Vercel 環境変数に `CRON_SECRET`・`DATABASE_URL`・`LLM_PROVIDER`・API キ
 ├── vercel.json
 └── package.json
 ```
+# 国会ラボ — 自動取得バッチ
+
+## 概要
+
+国会会議録検索システムAPIから毎日自動で新着会議録を取得し、
+DB保存・要約生成・管理者まとめ下書き生成までを行います。
+
+## データ取得元
+
+- **国立国会図書館 国会会議録検索システム**
+- API: https://kokkai.ndl.go.jp/api.html
+
+## ⚠️ API利用時の注意
+
+- 高頻度アクセスを避けてください（1日1回推奨）
+- **継続的な営利利用前に、利用条件の確認と必要な申請を行ってください**
+- API利用規約: https://kokkai.ndl.go.jp/
+- 取得データの著作権は国会会議録に準じます
+- 自動要約はAI下書きであり、公開前に人による確認を推奨します
+
+## 自動取得の仕組み
+
+### 処理フロー
+
+1. NDL APIから前日の会議録を取得
+2. Meeting / Speech をDB保存（upsert）
+3. Anthropic APIで要約を生成
+4. 管理者まとめ（AI下書き）を生成
+5. FetchLogに実行ログを記録
+
+### 冪等性
+
+- issueId（NDL会議ID）のユニーク制約で重複登録を防止
+- 要約は既存がなければ生成（既存はスキップ）
+- 管理者まとめはupsert（同日分は上書き）
+- 再実行しても安全
+
+## 実行方法
+
+### 手動実行（ローカル）
+
+```bash
+# 前日分を取得
+npx tsx src/jobs/fetch-meetings.ts
+
+# 特定日を取得
+npx tsx src/jobs/backfill.ts --from 2025-06-05 --to 2025-06-05
+
+# 管理者まとめを生成
+npx tsx src/jobs/generate-editor-note.ts --date 2025-06-05
+```
+
+### 手動実行（API経由）
+
+```
+GET /api/cron/fetch?token=YOUR_CRON_SECRET
+GET /api/cron/fetch?token=YOUR_CRON_SECRET&date=2025-06-05
+```
+
+### Vercel Cron（自動実行）
+
+`vercel.json` に以下を設定済み:
+
+```json
+{
+  "crons": [{ "path": "/api/cron/fetch", "schedule": "0 20 * * *" }]
+}
+```
+
+毎日 UTC 20:00（日本時間 翌5:00）に自動実行されます。
+
+### 環境変数
+
+| 変数名 | 用途 | 必須 |
+|---|---|---|
+| DATABASE_URL | Supabase接続（pooler） | ✅ |
+| DIRECT_URL | Supabase接続（direct） | ✅ |
+| ANTHROPIC_API_KEY | 要約生成用 | ✅ |
+| ANTHROPIC_MODEL | 使用モデル | 任意 |
+| CRON_SECRET | Cron認証用 | 推奨 |
+
+## 障害時の確認方法
+
+1. Vercel Logs でエラーを確認
+2. DB の `FetchLog` テーブルで取得状況を確認
+3. 特定日の再取得: `npx tsx src/jobs/backfill.ts --from YYYY-MM-DD --to YYYY-MM-DD`
+4. 要約失敗分の再生成: 同じbackfillコマンドで再実行（既存Meetingはスキップ、要約なしのみ生成）
+
+## 今すぐ実装できること / 本番収益化前に確認すべきこと
+
+### 今すぐ可能
+- 日次自動取得
+- 要約生成
+- 管理者まとめ下書き生成
+- サイト表示
+
+### 収益化前に確認が必要
+- NDL API利用規約の再確認（営利利用時の申請有無）
+- 会議録データの二次利用条件
+- AI要約の免責表示
+- 広告掲載時のデータ利用条件との整合性

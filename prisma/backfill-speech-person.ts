@@ -18,37 +18,9 @@
  */
 
  import { PrismaClient } from "@prisma/client";
+ import { normalizeSpeakerName, isValidPersonName } from "../src/lib/person-utils";
 
  const prisma = new PrismaClient();
-
- /** speaker 文字列を正規化する */
- function normalizeSpeakerName(raw: string): string {
-   return raw
-     .replace(/^[○〇]\s*/, "")      // 先頭の○マーク除去
-     .replace(/\s+/g, "")           // 全角・半角スペース除去
-     .replace(/君$/g, "")           // 末尾の「君」除去
-     .trim();
- }
-
- /** 人名として有効かどうか判定 */
- function isValidPersonName(name: string): boolean {
-   if (!name) return false;
-   if (name.length < 2 || name.length > 10) return false;
-
-   const blocked = [
-     "委員長", "理事", "議長", "副議長", "会長",
-     "参考人", "政府参考人", "公述人", "説明員", "事務局",
-     "会議録情報", "議事日程", "発言者", "委員会", "本会議",
-     "理事会", "速記",
-   ];
-
-   if (blocked.some((word) => name.includes(word))) return false;
-
-   // 漢字・ひらがな・カタカナのみで構成されているか
-   if (!/^[一-龯々ぁ-んァ-ヶー]+$/.test(name)) return false;
-
-   return true;
- }
 
  async function main() {
    console.log("=== Speech → Person バックフィル ===\n");
