@@ -211,14 +211,17 @@
      } catch (err) {
        console.error(`${progress} Unexpected error for ${date}:`, err);
        results.push({
-         date,
-         fetched: 0,
-         summariesGenerated: 0,
-         summariesSkipped: 0,
-         summaryErrors: 0,
-         errors: [String(err)],
-         status: "error",
-       });
+        date,
+        fetched: 0,
+        saved: 0,
+        updated: 0,
+        skipped: 0,
+        summariesGenerated: 0,
+        summariesSkipped: 0,
+        summaryErrors: 0,
+        errors: [String(err)],
+        status: "error",
+      });
      }
 
      // 最終日以外は日間ウェイト
