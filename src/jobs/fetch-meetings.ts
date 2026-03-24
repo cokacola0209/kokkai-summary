@@ -1,12 +1,12 @@
 // src/jobs/fetch-meetings.ts
 /**
- * 前日分の会議録を NDL API から取得して DB に保存するバッチジョブ。
+ * 会議録を NDL API から取得して DB に保存するバッチジョブ。
  *
  * 使用方法:
  *   npx tsx src/jobs/fetch-meetings.ts            # 前日
  *   npx tsx src/jobs/fetch-meetings.ts 2024-05-01 # 指定日
  *
- * cron 例 (毎朝 5:00 JST):
+ * cron 例 (毎朝 5:00 JST = UTC 20:00 前日):
  *   0 20 * * * cd /path/to/project && npx tsx src/jobs/fetch-meetings.ts >> logs/fetch.log 2>&1
  */
 
@@ -21,7 +21,10 @@
 
  export interface DayResult {
    date: string;
-   fetched: number;
+   fetched: number;        // APIから取得できた会議数
+   saved: number;          // DBに新規保存した会議数
+   updated: number;        // speeches が変化して更新した会議数
+   skipped: number;        // 変化なしでスキップした会議数
    summariesGenerated: number;
    summariesSkipped: number;
    summaryErrors: number;
@@ -76,7 +79,6 @@
    meetingId: string,
    speeches: NdlSpeechRecord[]
  ): Promise<void> {
-   // 既存削除 → 再挿入 (シンプルな冪等戦略)
    await prisma.speech.deleteMany({ where: { meetingId } });
 
    const data = speeches
@@ -94,22 +96,45 @@
    }
  }
 
+ /**
+  * speeches の簡易ハッシュを生成する。
+  * speechOrder + speaker + text の先頭100文字を連結してハッシュ代わりに使う。
+  * 全文比較はコスト高のため、変化の検知に十分な粒度に絞っている。
+  * NDL API のレスポンスに speeches が含まれているので追加 API 呼び出しは不要。
+  */
+ function buildSpeechFingerprint(speeches: NdlSpeechRecord[]): string {
+   return speeches
+     .filter((s) => s.speech?.trim())
+     .map((s) => `${s.speechOrder}:${s.speaker}:${(s.speech ?? "").slice(0, 100)}`)
+     .join("|");
+ }
+
  // ──────────────────────────────────────────
- // コア処理 (1日分) — backfill.ts からも利用
+ // コア処理 (1日分)
  // ──────────────────────────────────────────
 
  /**
-  * 指定日の会議録を取得・保存・要約する。
-  * fetchLog への記録もここで行う。
+  * 指定日の会議録を取得・差分判定・保存・要約する。
+  *
+  * 差分判定の方針:
+  * - DBに存在しない ndlId → 新規 (saved++)
+  * - DBに存在し speeches 件数が変化した → 更新 (updated++)
+  * - DBに存在し speeches 件数が同じ    → スキップ (skipped++)
+  *
+  * speeches の全文比較は重いため、件数をプロキシとして使う。
+  * NDL API のレスポンス自体に speeches が含まれているので追加 API 呼び出しは不要。
   */
  export async function processSingleDay(targetDate: string): Promise<DayResult> {
    console.log(`\n========================================`);
    console.log(`[Fetch Job] Target date: ${targetDate}`);
-   console.log(`========================================\n`);
+   console.log(`========================================`);
 
    const result: DayResult = {
      date: targetDate,
      fetched: 0,
+     saved: 0,
+     updated: 0,
+     skipped: 0,
      summariesGenerated: 0,
      summariesSkipped: 0,
      summaryErrors: 0,
@@ -119,6 +144,7 @@
 
    try {
      const records = await fetchMeetingsByDate({ date: targetDate });
+     result.fetched = records.length;
 
      if (records.length === 0) {
        console.log(`[Job] No meetings found for ${targetDate}`);
@@ -134,34 +160,84 @@
        return result;
      }
 
+     // ── 差分判定のために既存 DB データを一括取得（N+1 回避）──
+     // speeches の fingerprint 比較用に order/speaker/text 先頭を取得する
+     const existingMeetings = await prisma.meeting.findMany({
+       where: {
+         ndlId: { in: records.map((r) => r.issueID) },
+       },
+       select: {
+         id: true,
+         ndlId: true,
+         speeches: {
+           select: { order: true, speaker: true, text: true },
+           orderBy: { order: "asc" },
+         },
+       },
+     });
+     const existingMap = new Map(
+       existingMeetings.map((m) => [m.ndlId, m])
+     );
+
      for (const record of records) {
        try {
-         console.log(
-           `\n[Job] Processing: ${record.nameOfHouse} ${record.nameOfMeeting} (${record.issueID})`
-         );
+         const existing = existingMap.get(record.issueID);
+         const isNew = !existing;
 
-         // 1. Meeting + Speech 保存
+         // ── 常に metadata を upsert する ──
+         // speeches の変化有無に関わらず title / issue / url / rawJson を最新に保つ
          const meetingId = await upsertMeeting(record);
-         await upsertSpeeches(meetingId, record.speechRecord ?? []);
-         result.fetched++;
 
-         // 2. 要約生成 (既存まとめがなければ生成)
+         // ── speeches の差分判定（簡易ハッシュ比較）──
+         const incomingFingerprint = buildSpeechFingerprint(record.speechRecord ?? []);
+         const existingFingerprint = existing
+           ? existing.speeches
+               .map((s) => `${s.order}:${s.speaker}:${s.text.slice(0, 100)}`)
+               .join("|")
+           : "";
+
+         const speechesChanged = incomingFingerprint !== existingFingerprint;
+
+         if (!isNew && !speechesChanged) {
+           // speeches に変化なし → speeches の delete/recreate をスキップ
+           console.log(
+             `[Job] SKIP  ${record.nameOfHouse} ${record.nameOfMeeting} ` +
+             `(metadata updated, speeches unchanged)`
+           );
+           result.skipped++;
+         } else {
+           // 新規 or speeches に変化あり → speeches を再保存
+           await upsertSpeeches(meetingId, record.speechRecord ?? []);
+
+           if (isNew) {
+             console.log(
+               `[Job] NEW   ${record.nameOfHouse} ${record.nameOfMeeting}`
+             );
+             result.saved++;
+           } else {
+             console.log(
+               `[Job] UPDATE ${record.nameOfHouse} ${record.nameOfMeeting} ` +
+               `(speeches changed)`
+             );
+             result.updated++;
+           }
+         }
+
+         // 要約生成（既存があればスキップ）
          const existingSummary = await prisma.summary.findUnique({
            where: { meetingId },
+           select: { id: true },
          });
          if (!existingSummary) {
            console.log(`[Job] Generating summary for ${meetingId}...`);
            try {
              await generateSummary(meetingId);
-             console.log(`[Job] Summary generated for ${meetingId}`);
              result.summariesGenerated++;
-           } catch (summaryErr) {
-             console.error(`[Job] Summary failed for ${meetingId}:`, summaryErr);
-             result.errors.push(`summary:${meetingId}: ${String(summaryErr)}`);
+           } catch (e) {
+             result.errors.push(`summary:${meetingId}: ${String(e)}`);
              result.summaryErrors++;
            }
          } else {
-           console.log(`[Job] Summary already exists for ${meetingId}, skipping.`);
            result.summariesSkipped++;
          }
        } catch (recordErr) {
@@ -170,7 +246,18 @@
        }
      }
 
-     // 3. ログ保存
+     // ── サマリーログ ──
+     console.log(`\n[Job] ---- ${targetDate} 結果 ----`);
+     console.log(`  API取得: ${result.fetched}件`);
+     console.log(`  新規:    ${result.saved}件`);
+     console.log(`  更新:    ${result.updated}件`);
+     console.log(`  スキップ: ${result.skipped}件`);
+     console.log(`  要約生成: ${result.summariesGenerated}件`);
+     console.log(`  要約スキップ: ${result.summariesSkipped}件`);
+     if (result.errors.length > 0) {
+       console.log(`  エラー:  ${result.errors.length}件`);
+     }
+
      result.status =
        result.errors.length === 0
          ? "success"
@@ -181,15 +268,11 @@
      await prisma.fetchLog.create({
        data: {
          date: new Date(targetDate),
-         status: (result.status as string) === "no_data" ? "success" : result.status,
+         status: result.status,
          fetched: result.fetched,
          errors: result.errors,
        },
      });
-
-     console.log(
-       `\n[Job] Completed ${targetDate}. fetched=${result.fetched}, errors=${result.errors.length}`
-     );
    } catch (err) {
      console.error(`[Job] Fatal error for ${targetDate}:`, err);
      result.status = "error";
@@ -209,12 +292,11 @@
  }
 
  // ──────────────────────────────────────────
- // CLI エントリポイント (従来と同じ挙動)
+ // CLI エントリポイント
  // ──────────────────────────────────────────
 
  async function main() {
    const targetDate = getTargetDate(process.argv[2]);
-
    try {
      const result = await processSingleDay(targetDate);
      if (result.status === "error" && result.fetched === 0) {
@@ -225,11 +307,7 @@
    }
  }
 
- // 直接実行時のみ main() を呼ぶ
- // (backfill.ts から import されたときは実行しない)
- const isDirectRun =
-   process.argv[1]?.includes("fetch-meetings") ?? false;
-
+ const isDirectRun = process.argv[1]?.includes("fetch-meetings") ?? false;
  if (isDirectRun) {
    main();
  }

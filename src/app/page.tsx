@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { unstable_cache } from "next/cache";
 import { AccordionDetails } from "@/components/Accordion";
 import { prisma } from "@/lib/prisma";
 import {
@@ -13,7 +14,12 @@ import {
 import { EditorNoteCard } from "@/components/EditorNoteCard";
 import { BillsPreviewCard } from "@/components/BillCard";
 import { isValidPersonName } from "@/lib/person-utils";
-export const revalidate = 0;
+
+// ✅ 変更①: revalidate=0 → 300（5分）に変更
+// revalidate=0 は毎リクエストごとに全クエリを実行する設定。
+// トップページは最新日付の会議を表示するだけなので5分キャッシュで十分。
+// バッチが更新したら revalidateTag('latest-meetings') で即時反映も可能。
+export const revalidate = 300;
 
 const CATEGORY_KEYWORDS: Record<string, string[]> = {
   外交: ["外交", "安全保障", "防衛", "日米", "中国", "台湾", "ウクライナ"],
@@ -24,14 +30,12 @@ const CATEGORY_KEYWORDS: Record<string, string[]> = {
   政治改革: ["政治改革", "政治資金", "献金", "選挙", "裏金", "改革"],
 };
 
+// ✅ 変更②: generateMetadata のDBクエリをキャッシュ
+// 毎ページビューで最新日付クエリが走っていた。5分キャッシュに。
 export async function generateMetadata(): Promise<Metadata> {
-  const latestDate = await prisma.meeting.findFirst({
-    orderBy: { date: "desc" },
-    select: { date: true },
-  });
-
+  const latestDate = await getCachedLatestDate();
   const dateStr = latestDate
-    ? latestDate.date.toLocaleDateString("ja-JP", {
+    ? latestDate.toLocaleDateString("ja-JP", {
         year: "numeric",
         month: "long",
         day: "numeric",
@@ -44,102 +48,169 @@ export async function generateMetadata(): Promise<Metadata> {
   };
 }
 
-async function getLatestMeetings() {
-  const latest = await prisma.meeting.findFirst({
-    orderBy: { date: "desc" },
-    select: { date: true },
-  });
+// ✅ 変更③: 最新日付取得をキャッシュ（generateMetadata と getLatestMeetings で二重に叩かないため）
+const getCachedLatestDate = unstable_cache(
+  async () => {
+    const latest = await prisma.meeting.findFirst({
+      orderBy: { date: "desc" },
+      select: { date: true },
+    });
+    return latest?.date ?? null;
+  },
+  ["latest-meeting-date"],
+  { revalidate: 300 }
+);
 
-  if (!latest) return { meetings: [], date: null };
+// ✅ 変更④: getLatestMeetings をキャッシュ（5分）
+// 毎リクエストで2クエリ走っていた。5分キャッシュで最新日の会議一覧を保持。
+const getLatestMeetings = unstable_cache(
+  async () => {
+    const date = await getCachedLatestDate();
+    if (!date) return { meetings: [], date: null };
 
-  const meetings = await prisma.meeting.findMany({
-    where: { date: latest.date },
-    orderBy: { nameOfMeeting: "asc" },
-    include: {
-      summary: true,
-      _count: { select: { speeches: true } },
-    },
-  });
+    const meetings = await prisma.meeting.findMany({
+      where: { date },
+      orderBy: { nameOfMeeting: "asc" },
+      include: {
+        summary: true,
+        _count: { select: { speeches: true } },
+      },
+    });
 
-  return { meetings, date: latest.date };
-}
+    return { meetings, date };
+  },
+  ["latest-meetings"],
+  { revalidate: 300 }
+);
 
-// ── 勢力図データ取得 ──
-async function getPartyBalance() {
-  const seats = await prisma.partySeat.findMany({
-    orderBy: [{ house: "asc" }, { seats: "desc" }],
-    include: {
-      party: {
-        select: {
-          shortName: true,
-          color: true,
+// ✅ 変更⑤: getPartyBalance をキャッシュ（1時間）
+// 勢力図は毎日変わらない。1時間キャッシュで十分。
+const getPartyBalance = unstable_cache(
+  async () => {
+    const seats = await prisma.partySeat.findMany({
+      orderBy: [{ house: "asc" }, { seats: "desc" }],
+      include: {
+        party: {
+          select: {
+            shortName: true,
+            color: true,
+          },
         },
       },
-    },
-  });
-
-  // 院ごとにグループ化し、最新 asOf のデータだけ使う
-  const byHouse = new Map<string, typeof seats>();
-  for (const s of seats) {
-    if (!byHouse.has(s.house)) {
-      byHouse.set(s.house, []);
-    }
-    byHouse.get(s.house)!.push(s);
-  }
-
-  const result: Array<{
-    house: string;
-    totalSeats: number;
-    majority: number;
-    parties: Array<{
-      shortName: string;
-      color: string;
-      seats: number;
-      pct: number;
-    }>;
-  }> = [];
-
-  for (const [house, houseSeats] of Array.from(byHouse)) {
-    const latestAsOf = houseSeats.reduce(
-      (max, s) => (s.asOf.getTime() > max.getTime() ? s.asOf : max),
-      houseSeats[0].asOf
-    );
-
-    const latestSeats = houseSeats
-      .filter((s) => s.asOf.getTime() === latestAsOf.getTime())
-      .sort((a, b) => b.seats - a.seats);
-
-    const totalSeats = house === "衆議院" ? 465 : 248;
-    const majority = Math.floor(totalSeats / 2) + 1;
-
-    result.push({
-      house,
-      totalSeats,
-      majority,
-      parties: latestSeats.map((s) => ({
-        shortName: s.party.shortName,
-        color: s.party.color,
-        seats: s.seats,
-        pct: Math.round((s.seats / totalSeats) * 100),
-      })),
     });
-  }
 
-  result.sort((a, b) => (a.house === "衆議院" ? -1 : 1));
-  return result;
-}
+    const byHouse = new Map<string, typeof seats>();
+    for (const s of seats) {
+      if (!byHouse.has(s.house)) {
+        byHouse.set(s.house, []);
+      }
+      byHouse.get(s.house)!.push(s);
+    }
+
+    const result: Array<{
+      house: string;
+      totalSeats: number;
+      majority: number;
+      parties: Array<{
+        shortName: string;
+        color: string;
+        seats: number;
+        pct: number;
+      }>;
+    }> = [];
+
+    for (const [house, houseSeats] of Array.from(byHouse)) {
+      const latestAsOf = houseSeats.reduce(
+        (max, s) => (s.asOf.getTime() > max.getTime() ? s.asOf : max),
+        houseSeats[0].asOf
+      );
+
+      const latestSeats = houseSeats
+        .filter((s) => s.asOf.getTime() === latestAsOf.getTime())
+        .sort((a, b) => b.seats - a.seats);
+
+      const totalSeats = house === "衆議院" ? 465 : 248;
+      const majority = Math.floor(totalSeats / 2) + 1;
+
+      result.push({
+        house,
+        totalSeats,
+        majority,
+        parties: latestSeats.map((s) => ({
+          shortName: s.party.shortName,
+          color: s.party.color,
+          seats: s.seats,
+          pct: Math.round((s.seats / totalSeats) * 100),
+        })),
+      });
+    }
+
+    result.sort((a, b) => (a.house === "衆議院" ? -1 : 1));
+    return result;
+  },
+  ["party-balance"],
+  { revalidate: 3600 }
+);
+
+// ✅ 変更⑥: getRecentTopics をキャッシュ（1時間）
+// 100件の meeting + summary 取得は重め。1時間キャッシュで十分新鮮。
+const getRecentTopics = unstable_cache(
+  async () => {
+    const meetings = await prisma.meeting.findMany({
+      orderBy: { date: "desc" },
+      take: 100,
+      include: {
+        summary: {
+          select: { keyTopics: true },
+        },
+      },
+    });
+
+    const counts = new Map<string, number>();
+    for (const m of meetings) {
+      for (const t of m.summary?.keyTopics ?? []) {
+        counts.set(t, (counts.get(t) ?? 0) + 1);
+      }
+    }
+
+    return Array.from(counts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .map(([t]) => t);
+  },
+  ["recent-topics"],
+  { revalidate: 3600 }
+);
+
+// ✅ 変更⑦: getRecentBills をキャッシュ（1時間）
+const getRecentBills = unstable_cache(
+  async () => {
+    return prisma.bill.findMany({
+      orderBy: [
+        { enactedAt: { sort: "desc", nulls: "last" } },
+        { passedAt: { sort: "desc", nulls: "last" } },
+        { submittedAt: { sort: "desc", nulls: "last" } },
+      ],
+      take: 5,
+      select: {
+        billCode: true,
+        title: true,
+        status: true,
+      },
+    });
+  },
+  ["recent-bills"],
+  { revalidate: 3600 }
+);
 
 function aggregateTopics(
   meetings: Awaited<ReturnType<typeof getLatestMeetings>>["meetings"]
 ): string[] {
   const counts = new Map<string, number>();
-
   for (const m of meetings) {
     for (const t of m.summary?.keyTopics ?? []) {
       counts.set(t, (counts.get(t) ?? 0) + 1);
     }
   }
-
   return Array.from(counts.entries())
     .sort((a, b) => b[1] - a[1])
     .slice(0, 10)
@@ -186,76 +257,52 @@ const PRIORITY_PEOPLE = [
   "岩屋毅",
 ];
 
+// ✅ 変更⑧: getPeopleKeywords をキャッシュ（5分）
+// person全件 + speeches JOIN は重め。引数の date を文字列化してキャッシュキーに使う。
 async function getPeopleKeywords(date: Date): Promise<string[]> {
-  const persons = await prisma.person.findMany({
-    where: {
-      speeches: {
-        some: {
-          meeting: {
-            date,
+  const dateKey = date.toISOString().split("T")[0];
+  return getCachedPeopleKeywords(dateKey, date);
+}
+
+const getCachedPeopleKeywords = unstable_cache(
+  async (_dateKey: string, date: Date) => {
+    const persons = await prisma.person.findMany({
+      where: {
+        speeches: {
+          some: {
+            meeting: { date },
           },
         },
       },
-    },
-    include: {
-      speeches: {
-        where: {
-          meeting: {
-            date,
-          },
-        },
-        select: {
-          id: true,
+      include: {
+        speeches: {
+          where: { meeting: { date } },
+          select: { id: true },
         },
       },
-    },
-  });
+    });
 
-  return persons
-    .map((p) => ({
-      name: p.name,
-      count: p.speeches.length,
-    }))
-    .filter((p) => p.name && p.name.trim().length > 0 && isValidPersonName(p.name))
-    .sort((a, b) => {
-      const aPriority = PRIORITY_PEOPLE.indexOf(a.name);
-      const bPriority = PRIORITY_PEOPLE.indexOf(b.name);
-      const aIsPriority = aPriority !== -1;
-      const bIsPriority = bPriority !== -1;
+    return persons
+      .map((p) => ({ name: p.name, count: p.speeches.length }))
+      .filter((p) => p.name && p.name.trim().length > 0 && isValidPersonName(p.name))
+      .sort((a, b) => {
+        const aPriority = PRIORITY_PEOPLE.indexOf(a.name);
+        const bPriority = PRIORITY_PEOPLE.indexOf(b.name);
+        const aIsPriority = aPriority !== -1;
+        const bIsPriority = bPriority !== -1;
 
-      if (aIsPriority && bIsPriority) return aPriority - bPriority;
-      if (aIsPriority) return -1;
-      if (bIsPriority) return 1;
-      if (b.count !== a.count) return b.count - a.count;
-
-      return a.name.localeCompare(b.name, "ja");
-    })
-    .slice(0, 24)
-    .map((p) => p.name);
-}
-
-async function getRecentTopics(): Promise<string[]> {
-  const meetings = await prisma.meeting.findMany({
-    orderBy: { date: "desc" },
-    take: 100,
-    include: {
-      summary: {
-        select: { keyTopics: true },
-      },
-    },
-  });
-
-  const counts = new Map<string, number>();
-  for (const m of meetings) {
-    for (const t of m.summary?.keyTopics ?? []) {
-      counts.set(t, (counts.get(t) ?? 0) + 1);
-    }
-  }
-
-  return Array.from(counts.entries())
-    .sort((a, b) => b[1] - a[1])
-    .map(([t]) => t);
-}
+        if (aIsPriority && bIsPriority) return aPriority - bPriority;
+        if (aIsPriority) return -1;
+        if (bIsPriority) return 1;
+        if (b.count !== a.count) return b.count - a.count;
+        return a.name.localeCompare(b.name, "ja");
+      })
+      .slice(0, 24)
+      .map((p) => p.name);
+  },
+  ["people-keywords"],
+  { revalidate: 300 }
+);
 
 function buildCategoryLinks(todayTopics: string[], allTopics: string[]) {
   return Object.entries(CATEGORY_KEYWORDS).map(([label, keywords]) => {
@@ -315,7 +362,6 @@ function NewsArticleJsonLd({
   );
 }
 
-// ── 勢力図コンポーネント ──
 function PartyBalanceChart({
   balanceData,
 }: {
@@ -345,7 +391,6 @@ function PartyBalanceChart({
               </span>
             </div>
 
-            {/* 議席バー */}
             <div className="relative mb-2">
               <div className="flex h-5 overflow-hidden rounded-full bg-slate-100">
                 {house.parties.map((p, i) => (
@@ -360,8 +405,6 @@ function PartyBalanceChart({
                   />
                 ))}
               </div>
-
-              {/* 過半数ライン */}
               <div
                 className="absolute top-0 h-5 border-r-2 border-dashed border-slate-900/30"
                 style={{
@@ -370,7 +413,6 @@ function PartyBalanceChart({
               />
             </div>
 
-            {/* 凡例 */}
             <div className="flex flex-wrap gap-x-3 gap-y-1">
               {house.parties.map((p, i) => (
                 <span
@@ -394,7 +436,14 @@ function PartyBalanceChart({
 }
 
 export default async function HomePage() {
-  const { meetings, date } = await getLatestMeetings();
+  // ✅ 変更⑨: 重いクエリをキャッシュ関数で並列実行
+  // キャッシュヒット時はDBを叩かないので接続数を消費しない
+  const [{ meetings, date }, partyBalance, allTopics, recentBills] = await Promise.all([
+    getLatestMeetings(),
+    getPartyBalance(),
+    getRecentTopics(),
+    getRecentBills(),
+  ]);
 
   if (!date || meetings.length === 0) {
     return (
@@ -414,9 +463,10 @@ export default async function HomePage() {
   const topTopics = aggregateTopics(meetings);
   const agreements = aggregateAgreements(meetings);
   const highlights = aggregateHighlights(meetings);
+
+  // peopleKeywords は date 依存なので別途取得（キャッシュ済み）
   const peopleKeywords = await getPeopleKeywords(date);
 
-  const allTopics = await getRecentTopics();
   const categoryLinks = buildCategoryLinks(topTopics, allTopics);
   const spotlightMeetings = meetings.slice(0, 3);
 
@@ -426,27 +476,7 @@ export default async function HomePage() {
   const meetingsWithSummary = meetings.filter((m) => m.summary);
   const totalSpeeches = meetings.reduce((s, m) => s + m._count.speeches, 0);
 
-  const partyBalance = await getPartyBalance();
-
-
-// ↓↓↓ ここから追加 ↓↓↓
-const recentBills = await prisma.bill.findMany({
-  orderBy: [
-    { enactedAt: { sort: "desc", nulls: "last" } },
-    { passedAt: { sort: "desc", nulls: "last" } },
-    { submittedAt: { sort: "desc", nulls: "last" } },
-  ],
-  take: 5,
-  select: {
-    billCode: true,
-    title: true,
-    status: true,
-  },
-});
-// ↑↑↑ ここまで追加 ↑↑↑
-
-return (
-
+  return (
     <>
       <NewsArticleJsonLd date={date} meetingCount={meetings.length} />
 
@@ -469,8 +499,6 @@ return (
 
         {/* 管理者まとめ */}
         <EditorNoteCard />
-
-
 
         {/* ── 統計バー ── */}
         <div className="mb-8 grid grid-cols-2 gap-3 fade-in-up delay-1 sm:grid-cols-4">
@@ -695,8 +723,6 @@ return (
   </div>
 </section>
 
-
-
             {/* 本日の合意・採決事項 */}
             {topAgreementItems.length > 0 && (
   <Section title="本日の主な合意・採決事項" icon="✅">
@@ -822,7 +848,6 @@ return (
               </div>
             </div>
 
-            {/* ★ 修正: Link の入れ子を解消 → 2つの独立した Link に分離 */}
             <Link
               href="/daily"
               className="block card text-center hover:border-blue-300"

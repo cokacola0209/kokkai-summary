@@ -12,8 +12,11 @@ import {
 } from "@/components/ui";
 import { BillMiniCard } from "@/components/BillCard";
 
+// ✅ 変更①: force-dynamic を削除し revalidate=3600 のみに
+// force-dynamic があると revalidate 設定が完全に無視される。
+// 会議録の詳細ページは一度作成されたら内容が変わらないコンテンツなので
+// 1時間キャッシュで十分。初回アクセス後はDBを叩かない。
 export const revalidate = 3600;
-export const dynamic = "force-dynamic";
 
 interface Props {
   params: { id: string };
@@ -507,7 +510,6 @@ interface SpeakerSummary {
   quotes: string[];
 }
 
-/** フル表示カード（上位4名用） */
 function SpeakerCard({ s }: { s: SpeakerSummary }) {
   return (
     <div className="card">
@@ -537,7 +539,6 @@ function SpeakerCard({ s }: { s: SpeakerSummary }) {
   );
 }
 
-/** 折りたたみカード（5名目以降用） */
 function CollapsedSpeakerCard({ s }: { s: SpeakerSummary }) {
   const summaryPreview = shortenText(s.summary, 50);
 
@@ -811,7 +812,6 @@ export default async function MeetingDetailPage({
   const speakerSummaries =
     (summary?.speakerSummaries as SpeakerSummary[] | null) ?? [];
 
-  // ── 上位4名（2列×2行）はフル表示、残りは折りたたみ ──
   const FULL_DISPLAY_COUNT = 2;
   const fullSpeakers = speakerSummaries.slice(0, FULL_DISPLAY_COUNT);
   const collapsedSpeakers = speakerSummaries.slice(FULL_DISPLAY_COUNT);

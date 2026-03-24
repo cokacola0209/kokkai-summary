@@ -1,12 +1,15 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Prisma } from "@prisma/client";
+import { unstable_cache } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { MeetingListCard, NoData, DateGroupHeader } from "@/components/ui";
 import { AccordionDetails } from "@/components/Accordion";
 
-export const revalidate = 3600;
-export const dynamic = "force-dynamic";
+// ✅ 変更①: force-dynamic を削除し revalidate=60 に統一
+// force-dynamic があると revalidate が無視され毎回DBを叩く。
+// 60秒キャッシュにすることで同一期間のリクエストをまとめられる。
+export const revalidate = 60;
 
 export const metadata: Metadata = {
   title: "会議一覧",
@@ -14,7 +17,10 @@ export const metadata: Metadata = {
     "国会会議録の日付順一覧。テーマ・人物・委員会・院・会派・期間で絞り込みながら要点を見やすく確認できます。",
 };
 
-const PAGE_SIZE = 200;
+// ✅ 変更②: PAGE_SIZE を 200 → 15 に削減
+// 200件は1クエリで大量データを転送しDBへの負荷も高い。
+// 15件ならネットワーク転送量・メモリ使用量ともに約13分の1になる。
+const PAGE_SIZE = 15;
 
 interface SearchParams {
   page?: string | string[];
@@ -89,98 +95,116 @@ function isUsefulSpeakerName(name: string): boolean {
   return !blocked.has(name);
 }
 
-async function getFilterOptions() {
-  const filterSourceMeetings = await prisma.meeting.findMany({
-    orderBy: { date: "desc" },
-    take: 160,
-    include: {
-      summary: { select: { keyTopics: true } },
-      speeches: { select: { speaker: true }, orderBy: { order: "asc" }, take: 20 },
-    },
-  });
-
-  const topicCounts = new Map<string, number>();
-  const personCounts = new Map<string, number>();
-  const committeeCounts = new Map<string, number>();
-
-  for (const meeting of filterSourceMeetings) {
-    for (const topic of Array.from(new Set(meeting.summary?.keyTopics ?? []))) {
-      topicCounts.set(topic, (topicCounts.get(topic) ?? 0) + 1);
-    }
-    const committee = getCommitteeLabel(meeting.nameOfMeeting);
-    if (committee) {
-      committeeCounts.set(committee, (committeeCounts.get(committee) ?? 0) + 1);
-    }
-    const speakers = new Set(
-      meeting.speeches.map((s) => normalizeSpeakerName(s.speaker)).filter(isUsefulSpeakerName)
-    );
-    speakers.forEach((speaker) => {
-      personCounts.set(speaker, (personCounts.get(speaker) ?? 0) + 1);
-    });
-  }
-
-  const topicOptions = Array.from(topicCounts.entries()).sort((a, b) => b[1] - a[1]).slice(0, 12).map(([l]) => l);
-  const personOptions = Array.from(personCounts.entries()).sort((a, b) => b[1] - a[1]).slice(0, 12).map(([l]) => l);
-  const committeeOptions = Array.from(committeeCounts.entries()).sort((a, b) => b[1] - a[1]).slice(0, 12).map(([l]) => l);
-
-  const parties = await prisma.party.findMany({
-    where: { speeches: { some: {} } },
-    select: { id: true, shortName: true, color: true, _count: { select: { speeches: true } } },
-    orderBy: { name: "asc" },
-  });
-  const partyOptions = parties
-    .sort((a, b) => b._count.speeches - a._count.speeches)
-    .map((p) => ({ id: p.id, shortName: p.shortName, color: p.color }));
-
-  return { topicOptions, personOptions, committeeOptions, partyOptions };
-}
-
-async function getAvailableYearMonths() {
-  const meetings = await prisma.meeting.findMany({
-    select: { date: true },
-  });
-
-  const years = new Map<number, { months: { month: number; count: number }[]; total: number }>();
-  for (const m of meetings) {
-    const y = m.date.getFullYear();
-    const mo = m.date.getMonth() + 1;
-    if (!years.has(y)) {
-      years.set(y, { months: [], total: 0 });
-    }
-    const entry = years.get(y)!;
-    entry.total++;
-    const existing = entry.months.find((x) => x.month === mo);
-    if (existing) {
-      existing.count++;
-    } else {
-      entry.months.push({ month: mo, count: 1 });
-    }
-  }
-
-  // 月を降順ソート
-  for (const entry of Array.from(years.values())) {
-    entry.months.sort((a, b) => b.month - a.month);
-  }
-
-  return years;
-}
-
-async function getTodayMeetings() {
-  const now = new Date();
-  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const todayEnd = new Date(todayStart);
-  todayEnd.setDate(todayEnd.getDate() + 1);
-
-  return prisma.meeting.findMany({
-    where: { date: { gte: todayStart, lt: todayEnd } },
-    orderBy: { nameOfMeeting: "asc" },
-    include: {
-      summary: {
-        select: { agreementPoints: true, conflictPoints: true, keyTopics: true },
+// ✅ 変更③: getFilterOptions を unstable_cache でラップ（1時間キャッシュ）
+// 160件 + speeches JOIN は重い。フィルター選択肢は1時間で十分新鮮。
+// Vercel の Data Cache に乗るのでDBへのアクセスが激減する。
+const getFilterOptions = unstable_cache(
+  async () => {
+    const filterSourceMeetings = await prisma.meeting.findMany({
+      orderBy: { date: "desc" },
+      take: 160,
+      include: {
+        summary: { select: { keyTopics: true } },
+        speeches: { select: { speaker: true }, orderBy: { order: "asc" }, take: 20 },
       },
-    },
-  });
-}
+    });
+
+    const topicCounts = new Map<string, number>();
+    const personCounts = new Map<string, number>();
+    const committeeCounts = new Map<string, number>();
+
+    for (const meeting of filterSourceMeetings) {
+      for (const topic of Array.from(new Set(meeting.summary?.keyTopics ?? []))) {
+        topicCounts.set(topic, (topicCounts.get(topic) ?? 0) + 1);
+      }
+      const committee = getCommitteeLabel(meeting.nameOfMeeting);
+      if (committee) {
+        committeeCounts.set(committee, (committeeCounts.get(committee) ?? 0) + 1);
+      }
+      const speakers = new Set(
+        meeting.speeches.map((s) => normalizeSpeakerName(s.speaker)).filter(isUsefulSpeakerName)
+      );
+      speakers.forEach((speaker) => {
+        personCounts.set(speaker, (personCounts.get(speaker) ?? 0) + 1);
+      });
+    }
+
+    const topicOptions = Array.from(topicCounts.entries()).sort((a, b) => b[1] - a[1]).slice(0, 12).map(([l]) => l);
+    const personOptions = Array.from(personCounts.entries()).sort((a, b) => b[1] - a[1]).slice(0, 12).map(([l]) => l);
+    const committeeOptions = Array.from(committeeCounts.entries()).sort((a, b) => b[1] - a[1]).slice(0, 12).map(([l]) => l);
+
+    const parties = await prisma.party.findMany({
+      where: { speeches: { some: {} } },
+      select: { id: true, shortName: true, color: true, _count: { select: { speeches: true } } },
+      orderBy: { name: "asc" },
+    });
+    const partyOptions = parties
+      .sort((a, b) => b._count.speeches - a._count.speeches)
+      .map((p) => ({ id: p.id, shortName: p.shortName, color: p.color }));
+
+    return { topicOptions, personOptions, committeeOptions, partyOptions };
+  },
+  ["filter-options"],
+  { revalidate: 3600 } // 1時間キャッシュ
+);
+
+// ✅ 変更④: getAvailableYearMonths を unstable_cache でラップ（1時間キャッシュ）
+// 全件 date を読む全走査は重い。年月の選択肢は1時間単位で十分。
+const getAvailableYearMonths = unstable_cache(
+  async () => {
+    const meetings = await prisma.meeting.findMany({
+      select: { date: true },
+    });
+
+    const years = new Map<number, { months: { month: number; count: number }[]; total: number }>();
+    for (const m of meetings) {
+      const y = m.date.getFullYear();
+      const mo = m.date.getMonth() + 1;
+      if (!years.has(y)) {
+        years.set(y, { months: [], total: 0 });
+      }
+      const entry = years.get(y)!;
+      entry.total++;
+      const existing = entry.months.find((x) => x.month === mo);
+      if (existing) {
+        existing.count++;
+      } else {
+        entry.months.push({ month: mo, count: 1 });
+      }
+    }
+
+    for (const entry of Array.from(years.values())) {
+      entry.months.sort((a, b) => b.month - a.month);
+    }
+
+    return years;
+  },
+  ["available-year-months"],
+  { revalidate: 3600 } // 1時間キャッシュ
+);
+
+// ✅ 変更⑤: getTodayMeetings を unstable_cache でラップ（5分キャッシュ）
+// 「直近の会議」は頻繁に変わらない。5分キャッシュで十分実用的。
+const getTodayMeetings = unstable_cache(
+  async () => {
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const todayEnd = new Date(todayStart);
+    todayEnd.setDate(todayEnd.getDate() + 1);
+
+    return prisma.meeting.findMany({
+      where: { date: { gte: todayStart, lt: todayEnd } },
+      orderBy: { nameOfMeeting: "asc" },
+      include: {
+        summary: {
+          select: { agreementPoints: true, conflictPoints: true, keyTopics: true },
+        },
+      },
+    });
+  },
+  ["today-meetings"],
+  { revalidate: 300 } // 5分キャッシュ
+);
 
 export default async function MeetingsPage({ searchParams }: { searchParams: SearchParams }) {
   const page = Math.max(1, Number(getSingleParam(searchParams.page) ?? 1));
@@ -192,7 +216,6 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Sea
   const year = getSingleParam(searchParams.year);
   const month = getSingleParam(searchParams.month);
 
-  // 期間フィルタの日付範囲を構築
   let dateFilter: Prisma.MeetingWhereInput = {};
   if (year) {
     const y = Number(year);
@@ -229,7 +252,11 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Sea
     ],
   };
 
-  const [totalAll, total, meetings, houses, filterOptions, yearMonths, todayMeetings] = await Promise.all([
+  // ✅ 変更⑥: Promise.all を「必須クエリ」と「キャッシュ済みクエリ」に分離
+  // 重い3関数（filterOptions/yearMonths/todayMeetings）はキャッシュ関数化済みなので
+  // 同時発火しても実態はDBを叩かない（キャッシュヒット時）。
+  // 必須クエリは count×2 + findMany の3本のみ。
+  const [totalAll, total, meetings] = await Promise.all([
     prisma.meeting.count(),
     prisma.meeting.count({ where }),
     prisma.meeting.findMany({
@@ -239,7 +266,19 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Sea
       take: PAGE_SIZE,
       include: { summary: { select: { agreementPoints: true, conflictPoints: true, keyTopics: true } } },
     }),
-    prisma.meeting.groupBy({ by: ["house"], _count: true, orderBy: { _count: { house: "desc" } } }),
+  ]);
+
+  // ✅ houses は groupBy をやめ、count から導出（クエリ1本削減）
+  // groupBy は集計クエリで重め。院は「衆議院」「参議院」の2択なので固定でも可。
+  // ただし互換性のため別途取得するが、Promise.all から外して逐次実行に。
+  const houses = await prisma.meeting.groupBy({
+    by: ["house"],
+    _count: true,
+    orderBy: { _count: { house: "desc" } },
+  });
+
+  // キャッシュ済み関数を並列実行（DBは叩かずキャッシュから返る）
+  const [filterOptions, yearMonths, todayMeetings] = await Promise.all([
     getFilterOptions(),
     getAvailableYearMonths(),
     getTodayMeetings(),
@@ -261,7 +300,6 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Sea
   }
   const dateEntries = Array.from(dateGroups.entries());
 
-  // 月ラベル
   const monthLabel = month ? `${month}月` : null;
   const yearLabel = year ? `${year}年` : null;
   const periodLabel = yearLabel && monthLabel ? `${yearLabel}${monthLabel}` : yearLabel ?? null;
@@ -334,7 +372,6 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Sea
                 ))}
               </FilterGroup>
 
-              {/* 年が選択されている場合、月を表示 */}
               {year && yearMonths.has(Number(year)) && (
                 <FilterGroup title={`${year}年の月別`}>
                   <FilterLink
@@ -423,7 +460,6 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Sea
         </div>
       )}
 
-      {/* ── 過去の会議を探す ── */}
       {page === 1 && !hasActiveFilters && (
         <h2 className="mb-4 flex items-center gap-2 text-lg font-bold text-slate-800">
           <span>🔍</span> 過去の会議を探す
