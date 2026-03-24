@@ -234,6 +234,8 @@
              await generateSummary(meetingId);
              result.summariesGenerated++;
            } catch (e) {
+             // ✅ 追加: スタックトレースを含む完全なエラーを Vercel Logs に出力
+             console.error(`[Job] Summary failed for meetingId=${meetingId}:`, e);
              result.errors.push(`summary:${meetingId}: ${String(e)}`);
              result.summaryErrors++;
            }
