@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { AccordionDetails } from "@/components/Accordion";
 import { prisma } from "@/lib/prisma";
+import { Prisma } from "@prisma/client";
 import {
   SummaryCard,
   NoData,
@@ -62,9 +63,16 @@ type PartyBalanceItem = {
   parties: Array<{ shortName: string; color: string; seats: number; pct: number }>;
 };
 
+type HomeMeeting = Prisma.MeetingGetPayload<{
+  include: {
+    summary: true;
+    _count: { select: { speeches: true } };
+  };
+}>;
+
 type HomePageData = {
   date: Date;
-  meetings: Awaited<ReturnType<typeof prisma.meeting.findMany>>;
+  meetings: HomeMeeting[];
   partyBalance: PartyBalanceItem[];
   allTopics: string[];
   recentBills: Array<{ billCode: string; title: string; status: string }>;
