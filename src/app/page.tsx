@@ -385,6 +385,7 @@ export default async function HomePage() {
   }
 
   const safePeopleKeywords = peopleKeywords ?? [];
+  const safeRecentBills = recentBills ?? [];
 
   const dateStr = date.toLocaleDateString("ja-JP", {
     year: "numeric",
@@ -724,7 +725,7 @@ export default async function HomePage() {
                 ))}
               </div>
             </Section>
-            <BillsPreviewCard bills={recentBills} />
+            <BillsPreviewCard bills={safeRecentBills} />
           </div>
 
           {/* ── サイドバー ── */}
