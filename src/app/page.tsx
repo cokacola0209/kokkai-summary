@@ -183,6 +183,55 @@ async function getHomePageData(): Promise<HomePageData | null> {
   return { date, meetings, partyBalance, allTopics, recentBills, peopleKeywords };
 }
 
+// ──────────────────────────────────────────
+// ヘルパー関数（会議データの集計）
+// ──────────────────────────────────────────
+
+function aggregateTopics(
+  meetings: HomePageData["meetings"]
+): string[] {
+  const counts = new Map<string, number>();
+  for (const m of meetings) {
+    for (const t of m.summary?.keyTopics ?? []) {
+      counts.set(t, (counts.get(t) ?? 0) + 1);
+    }
+  }
+  return Array.from(counts.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 10)
+    .map(([t]) => t);
+}
+
+function aggregateAgreements(
+  meetings: HomePageData["meetings"]
+): Array<{ text: string; meeting: string }> {
+  return meetings.flatMap((m) =>
+    (m.summary?.agreementPoints ?? []).map((a) => ({
+      text: a,
+      meeting: m.nameOfMeeting,
+    }))
+  );
+}
+
+function aggregateHighlights(
+  meetings: HomePageData["meetings"]
+): Array<{ text: string; meeting: string; type: "conflict" | "impact" }> {
+  const items: Array<{
+    text: string;
+    meeting: string;
+    type: "conflict" | "impact";
+  }> = [];
+  for (const m of meetings) {
+    for (const c of m.summary?.conflictPoints ?? []) {
+      items.push({ text: c, meeting: m.nameOfMeeting, type: "conflict" });
+    }
+    for (const n of m.summary?.impactNotes ?? []) {
+      items.push({ text: n, meeting: m.nameOfMeeting, type: "impact" });
+    }
+  }
+  return items.slice(0, 5);
+}
+
 function buildCategoryLinks(todayTopics: string[], allTopics: string[]) {
   return Object.entries(CATEGORY_KEYWORDS).map(([label, keywords]) => {
     const todayMatch =
