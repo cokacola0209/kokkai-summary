@@ -15,9 +15,10 @@ import { EditorNoteCard } from "@/components/EditorNoteCard";
 import { BillsPreviewCard } from "@/components/BillCard";
 import { isValidPersonName } from "@/lib/person-utils";
 
-// revalidate = 300: ページ全体を5分キャッシュ
-// unstable_cache を外した代わりに、ページ単位のキャッシュに一本化する
-export const revalidate = 300;
+// force-dynamic: "/" の build 時 prerender を止める
+// plain async + 直列 await にしても build 全体の並列 prerender は防げないため、
+// トップページに限り force-dynamic を採用して build 時 DB 接続を回避する
+export const dynamic = "force-dynamic";
 
 // PR1: generateMetadata を静的 metadata に置き換え
 // 理由: generateMetadata() は build 時に必ず実行され、内部で DB に接続していた。
