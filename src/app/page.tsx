@@ -386,6 +386,7 @@ export default async function HomePage() {
 
   const safePeopleKeywords = peopleKeywords ?? [];
   const safeRecentBills = recentBills ?? [];
+  const safePartyBalance = partyBalance ?? [];
 
   const dateStr = date.toLocaleDateString("ja-JP", {
     year: "numeric",
@@ -747,7 +748,7 @@ export default async function HomePage() {
             </div>
 
             {/* ── 勢力図 ── */}
-            <PartyBalanceChart balanceData={partyBalance} />
+            <PartyBalanceChart balanceData={safePartyBalance} />
 
             <div className="card">
               <p className="mb-3 font-semibold text-slate-700">🏛 院別の内訳</p>
