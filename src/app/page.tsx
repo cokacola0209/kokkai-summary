@@ -384,6 +384,8 @@ export default async function HomePage() {
     );
   }
 
+  const safePeopleKeywords = peopleKeywords ?? [];
+
   const dateStr = date.toLocaleDateString("ja-JP", {
     year: "numeric",
     month: "long",
@@ -577,12 +579,12 @@ export default async function HomePage() {
   </p>
 
   <div className="mt-3">
-  {peopleKeywords.length > 0 ? (
+  {safePeopleKeywords.length > 0 ? (
     <>
       <div className="relative">
         <div className="max-h-[72px] overflow-hidden">
           <div className="flex flex-wrap gap-2">
-            {peopleKeywords.map((name) => (
+            {safePeopleKeywords.map((name) => (
               <Link
                 key={name}
                 href={`/meetings?person=${encodeURIComponent(name)}`}
