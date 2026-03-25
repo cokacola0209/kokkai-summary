@@ -395,7 +395,7 @@ export default async function HomePage() {
   const agreements = aggregateAgreements(meetings);
   const highlights = aggregateHighlights(meetings);
 
-  const categoryLinks = buildCategoryLinks(topTopics, allTopics);
+  const categoryLinks = buildCategoryLinks(topTopics, allTopics ?? []);
   const spotlightMeetings = meetings.slice(0, 3);
 
   const topHighlightItems = highlights.slice(0, 3);
