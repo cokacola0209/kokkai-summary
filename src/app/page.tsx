@@ -15,9 +15,9 @@ import { EditorNoteCard } from "@/components/EditorNoteCard";
 import { BillsPreviewCard } from "@/components/BillCard";
 import { isValidPersonName } from "@/lib/person-utils";
 
-// PR1: force-dynamic は維持（PR2 で削除予定）
-// revalidate は force-dynamic 中は無効だが、PR2 で有効化する
-export const dynamic = "force-dynamic";
+// PR2: force-dynamic を削除し revalidate = 300 を有効化
+// 理由: force-dynamic があると revalidate が無視され毎リクエストでDBを叩く。
+// Promise.all を直列 await に変えたことで build 時の並列接続問題も解消。
 export const revalidate = 300;
 
 // PR1: generateMetadata を静的 metadata に置き換え
@@ -426,14 +426,15 @@ function PartyBalanceChart({
 }
 
 export default async function HomePage() {
-  // ✅ 変更⑨: 重いクエリをキャッシュ関数で並列実行
-  // キャッシュヒット時はDBを叩かないので接続数を消費しない
-  const [{ meetings, date }, partyBalance, allTopics, recentBills] = await Promise.all([
-    getLatestMeetings(),
-    getPartyBalance(),
-    getRecentTopics(),
-    getRecentBills(),
-  ]);
+  // PR2: Promise.all をやめて直列 await に変更
+  // 理由: build 時に unstable_cache 関数が並列実行されると connection_limit=1 の
+  // pooled 接続に複数接続が競合してタイムアウトする。
+  // 直列にすることで1本ずつ順番に接続するため競合が起きない。
+  // ランタイムではキャッシュヒット時にDBを叩かないため速度への影響は最小限。
+  const { meetings, date } = await getLatestMeetings();
+  const partyBalance = await getPartyBalance();
+  const allTopics = await getRecentTopics();
+  const recentBills = await getRecentBills();
 
   if (!date || meetings.length === 0) {
     return (
