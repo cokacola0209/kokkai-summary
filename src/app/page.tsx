@@ -15,11 +15,19 @@ import { EditorNoteCard } from "@/components/EditorNoteCard";
 import { BillsPreviewCard } from "@/components/BillCard";
 import { isValidPersonName } from "@/lib/person-utils";
 
-// ✅ 変更①: revalidate=0 → 300（5分）に変更
-// revalidate=0 は毎リクエストごとに全クエリを実行する設定。
-// トップページは最新日付の会議を表示するだけなので5分キャッシュで十分。
-// バッチが更新したら revalidateTag('latest-meetings') で即時反映も可能。
+// PR1: force-dynamic は維持（PR2 で削除予定）
+// revalidate は force-dynamic 中は無効だが、PR2 で有効化する
+export const dynamic = "force-dynamic";
 export const revalidate = 300;
+
+// PR1: generateMetadata を静的 metadata に置き換え
+// 理由: generateMetadata() は build 時に必ず実行され、内部で DB に接続していた。
+// 固定文言に変えることで build 時の DB 接続を1本削減する。
+export const metadata: Metadata = {
+  title: "直近の国会まとめ – 国会ラボ",
+  description:
+    "国会審議をAIが3分で要約。根拠・影響・未解決点を構造化表示。国立国会図書館の会議録をもとに毎日更新。",
+};
 
 const CATEGORY_KEYWORDS: Record<string, string[]> = {
   外交: ["外交", "安全保障", "防衛", "日米", "中国", "台湾", "ウクライナ"],
@@ -30,25 +38,7 @@ const CATEGORY_KEYWORDS: Record<string, string[]> = {
   政治改革: ["政治改革", "政治資金", "献金", "選挙", "裏金", "改革"],
 };
 
-// ✅ 変更②: generateMetadata のDBクエリをキャッシュ
-// 毎ページビューで最新日付クエリが走っていた。5分キャッシュに。
-export async function generateMetadata(): Promise<Metadata> {
-  const latestDate = await getCachedLatestDate();
-  const dateStr = latestDate
-    ? latestDate.toLocaleDateString("ja-JP", {
-        year: "numeric",
-        month: "long",
-        day: "numeric",
-      })
-    : "";
-
-  return {
-    title: `直近の国会まとめ${dateStr ? ` – ${dateStr}` : ""}`,
-    description: `${dateStr}の国会審議をAIが3分で要約。根拠・影響・未解決点を構造化表示。`,
-  };
-}
-
-// ✅ 変更③: 最新日付取得をキャッシュ（generateMetadata と getLatestMeetings で二重に叩かないため）
+// getCachedLatestDate は getLatestMeetings の内部でも使われているため残す
 const getCachedLatestDate = unstable_cache(
   async () => {
     const latest = await prisma.meeting.findFirst({
