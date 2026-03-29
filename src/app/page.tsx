@@ -151,15 +151,10 @@ async function getHomePageData(): Promise<HomePageData | null> {
   }
   partyBalance.sort((a, b) => (a.house === "衆議院" ? -1 : 1));
 
-  // 直近トピック（getRecentTopics を廃止し直接クエリ）
-  // take: 100 → 30 に削減（トップページのタグ表示には30件で十分）
-  const recentMeetings = await prisma.meeting.findMany({
-    orderBy: { date: "desc" },
-    take: 30,
-    include: { summary: { select: { keyTopics: true } } },
-  });
+  // allTopics: 上で取得済みの meetings の keyTopics から集計（DB再取得なし）
+  // 以前は別途 meeting.findMany(take:30) していたが、meetings に keyTopics が含まれているため不要
   const topicCounts = new Map<string, number>();
-  for (const m of recentMeetings) {
+  for (const m of meetings) {
     for (const t of m.summary?.keyTopics ?? []) {
       topicCounts.set(t, (topicCounts.get(t) ?? 0) + 1);
     }
