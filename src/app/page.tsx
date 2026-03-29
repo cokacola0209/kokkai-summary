@@ -50,12 +50,21 @@ const CATEGORY_KEYWORDS: Record<string, string[]> = {
 //   これが connection_limit=1 の pooled 接続環境での競合・タイムアウトの要因だった。
 //
 //   plain async 関数にすることで、unstable_cache による自動実行をなくし、
-//   ページ単位の revalidate = 300 に一本化する。
 //   build 時の挙動を単純化して接続競合の要因を減らすことが目的。
 //
 // キャッシュ:
-//   ページ全体が revalidate = 300（5分）でキャッシュされるため、
-//   個別の関数キャッシュがなくても5分に1回しかDBを叩かない。
+//   force-dynamic のため Next.js のページキャッシュは効かない。
+//   代わりにインメモリキャッシュ（TTL 60秒）で DB アクセス回数を抑制する。
+//   同時リクエスト時は in-flight の Promise を共有し、二重実行を防ぐ。
+
+// ── インメモリキャッシュ（connection_limit=1 対策） ──
+// force-dynamic を維持したまま、runtime の DB アクセス頻度を下げる。
+// - TTL 60秒: 期限内はキャッシュを返し、DB に行かない
+// - in-flight 共有: 同時アクセスで同じ Promise を使い回し、二重クエリを防ぐ
+const CACHE_TTL_MS = 60_000;
+let cachedData: HomePageData | null = null;
+let cachedAt = 0;
+let inflight: Promise<HomePageData | null> | null = null;
 
 type PartyBalanceItem = {
   house: string;
@@ -180,6 +189,29 @@ async function getHomePageData(): Promise<HomePageData | null> {
   const peopleKeywords: string[] = [];
 
   return { date, meetings, partyBalance, allTopics, recentBills, peopleKeywords };
+}
+
+/** キャッシュ付きラッパー。TTL 内はキャッシュを返し、同時リクエストは Promise を共有する */
+async function getCachedHomePageData(): Promise<HomePageData | null> {
+  // TTL 内ならキャッシュを返す
+  if (cachedData && Date.now() - cachedAt < CACHE_TTL_MS) {
+    return cachedData;
+  }
+  // 別リクエストが既に取得中なら、その Promise を待つ（二重クエリ防止）
+  if (inflight) {
+    return inflight;
+  }
+  // DB 取得を開始し、Promise を共有する
+  inflight = getHomePageData()
+    .then((data) => {
+      cachedData = data;
+      cachedAt = Date.now();
+      return data;
+    })
+    .finally(() => {
+      inflight = null;
+    });
+  return inflight;
 }
 
 // ──────────────────────────────────────────
@@ -363,8 +395,8 @@ function PartyBalanceChart({
 }
 
 export default async function HomePage() {
-  // PR3: getHomePageData にまとめた plain async 関数を呼ぶ
-  const data = await getHomePageData();
+  // PR3: getHomePageData にまとめた plain async 関数を呼ぶ（インメモリキャッシュ経由）
+  const data = await getCachedHomePageData();
   const { meetings, date, partyBalance, allTopics, recentBills, peopleKeywords } = data ?? {};
 
   if (!data || !date || !meetings || meetings.length === 0) {
