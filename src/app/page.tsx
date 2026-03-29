@@ -66,7 +66,15 @@ type PartyBalanceItem = {
 
 type HomeMeeting = Prisma.MeetingGetPayload<{
   include: {
-    summary: true;
+    summary: {
+      select: {
+        keyTopics: true;
+        bullets: true;
+        agreementPoints: true;
+        conflictPoints: true;
+        impactNotes: true;
+      };
+    };
     _count: { select: { speeches: true } };
   };
 }>;
@@ -90,11 +98,20 @@ async function getHomePageData(): Promise<HomePageData | null> {
   const date = latest.date;
 
   // 最新日の会議一覧（getLatestMeetings を廃止し直接クエリ）
+  // summary: true から必要な列だけ select に変更（speakerSummaries 等の大きなJSONを除外）
   const meetings = await prisma.meeting.findMany({
     where: { date },
     orderBy: { nameOfMeeting: "asc" },
     include: {
-      summary: true,
+      summary: {
+        select: {
+          keyTopics: true,
+          bullets: true,
+          agreementPoints: true,
+          conflictPoints: true,
+          impactNotes: true,
+        },
+      },
       _count: { select: { speeches: true } },
     },
   });
@@ -135,9 +152,10 @@ async function getHomePageData(): Promise<HomePageData | null> {
   partyBalance.sort((a, b) => (a.house === "衆議院" ? -1 : 1));
 
   // 直近トピック（getRecentTopics を廃止し直接クエリ）
+  // take: 100 → 30 に削減（トップページのタグ表示には30件で十分）
   const recentMeetings = await prisma.meeting.findMany({
     orderBy: { date: "desc" },
-    take: 100,
+    take: 30,
     include: { summary: { select: { keyTopics: true } } },
   });
   const topicCounts = new Map<string, number>();
@@ -162,18 +180,17 @@ async function getHomePageData(): Promise<HomePageData | null> {
   });
 
   // 人物キーワード（getCachedPeopleKeywords を廃止し直接クエリ）
+  // speeches の include を _count に変更（件数だけ取れば十分）
   const persons = await prisma.person.findMany({
     where: { speeches: { some: { meeting: { date } } } },
-    include: {
-      speeches: {
-        where: { meeting: { date } },
-        select: { id: true },
-      },
+    select: {
+      name: true,
+      _count: { select: { speeches: true } },
     },
   });
   const PRIORITY_PEOPLE = ["小野田紀美", "高市早苗", "小泉進次郎", "石破茂", "岩屋毅"];
   const peopleKeywords = persons
-    .map((p) => ({ name: p.name, count: p.speeches.length }))
+    .map((p) => ({ name: p.name, count: p._count.speeches }))
     .filter((p) => p.name && p.name.trim().length > 0 && isValidPersonName(p.name))
     .sort((a, b) => {
       const aPriority = PRIORITY_PEOPLE.indexOf(a.name);
