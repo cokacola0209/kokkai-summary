@@ -16,10 +16,12 @@ import { EditorNoteCard } from "@/components/EditorNoteCard";
 import { BillsPreviewCard } from "@/components/BillCard";
 import { isValidPersonName } from "@/lib/person-utils";
 
-// ISR: 60秒ごとに再検証。force-dynamic をやめることで
-// Next.js Data Cache が Lambda 間で共有され、DB 接続頻度が激減する。
-// build 時は1回だけ prerender が走る（同時 prerender は /meetings, /people と計3本程度）。
-export const revalidate = 60;
+// force-dynamic: build 時の prerender を止める。
+// connection_limit=1 環境では build 時に複数ページが同時 prerender すると
+// Prisma 内部プールの1本を奪い合い P2024 が発生するため。
+// データ取得は unstable_cache (Data Cache) でラップしており、
+// runtime でも revalidate 間隔に1回しか DB を叩かない。
+export const dynamic = "force-dynamic";
 
 // PR1: generateMetadata を静的 metadata に置き換え
 // 理由: generateMetadata() は build 時に必ず実行され、内部で DB に接続していた。
