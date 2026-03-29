@@ -74,7 +74,10 @@ type PartyBalanceItem = {
 };
 
 type HomeMeeting = Prisma.MeetingGetPayload<{
-  include: {
+  select: {
+    id: true;
+    house: true;
+    nameOfMeeting: true;
     summary: {
       select: {
         keyTopics: true;
@@ -107,11 +110,14 @@ async function getHomePageData(): Promise<HomePageData | null> {
   const date = latest.date;
 
   // 最新日の会議一覧（getLatestMeetings を廃止し直接クエリ）
-  // summary: true から必要な列だけ select に変更（speakerSummaries 等の大きなJSONを除外）
+  // select で必要列のみ取得。rawJson 等の大きなカラムを除外し接続保持時間を短縮する。
   const meetings = await prisma.meeting.findMany({
     where: { date },
     orderBy: { nameOfMeeting: "asc" },
-    include: {
+    select: {
+      id: true,
+      house: true,
+      nameOfMeeting: true,
       summary: {
         select: {
           keyTopics: true,
