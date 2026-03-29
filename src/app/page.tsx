@@ -174,32 +174,10 @@ async function getHomePageData(): Promise<HomePageData | null> {
     select: { billCode: true, title: true, status: true },
   });
 
-  // 人物キーワード（getCachedPeopleKeywords を廃止し直接クエリ）
-  // speeches の include を _count に変更（件数だけ取れば十分）
-  const persons = await prisma.person.findMany({
-    where: { speeches: { some: { meeting: { date } } } },
-    select: {
-      name: true,
-      _count: { select: { speeches: true } },
-    },
-  });
-  const PRIORITY_PEOPLE = ["小野田紀美", "高市早苗", "小泉進次郎", "石破茂", "岩屋毅"];
-  const peopleKeywords = persons
-    .map((p) => ({ name: p.name, count: p._count.speeches }))
-    .filter((p) => p.name && p.name.trim().length > 0 && isValidPersonName(p.name))
-    .sort((a, b) => {
-      const aPriority = PRIORITY_PEOPLE.indexOf(a.name);
-      const bPriority = PRIORITY_PEOPLE.indexOf(b.name);
-      const aIsPriority = aPriority !== -1;
-      const bIsPriority = bPriority !== -1;
-      if (aIsPriority && bIsPriority) return aPriority - bPriority;
-      if (aIsPriority) return -1;
-      if (bIsPriority) return 1;
-      if (b.count !== a.count) return b.count - a.count;
-      return a.name.localeCompare(b.name, "ja");
-    })
-    .slice(0, 24)
-    .map((p) => p.name);
+  // 人物キーワード: person.findMany は speeches → meeting の2段ネスト subquery を含み重い。
+  // connection_limit=1 環境での接続詰まりを避けるため、一旦スキップして空配列を返す。
+  // UIは既存の「人物キーワードはまだ少なめです」フォールバックがそのまま表示される。
+  const peopleKeywords: string[] = [];
 
   return { date, meetings, partyBalance, allTopics, recentBills, peopleKeywords };
 }
