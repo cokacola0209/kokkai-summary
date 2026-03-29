@@ -3,6 +3,7 @@ import Link from "next/link";
 import { AccordionDetails } from "@/components/Accordion";
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
+import { unstable_cache } from "next/cache";
 import {
   SummaryCard,
   NoData,
@@ -15,10 +16,10 @@ import { EditorNoteCard } from "@/components/EditorNoteCard";
 import { BillsPreviewCard } from "@/components/BillCard";
 import { isValidPersonName } from "@/lib/person-utils";
 
-// force-dynamic: "/" の build 時 prerender を止める
-// plain async + 直列 await にしても build 全体の並列 prerender は防げないため、
-// トップページに限り force-dynamic を採用して build 時 DB 接続を回避する
-export const dynamic = "force-dynamic";
+// ISR: 60秒ごとに再検証。force-dynamic をやめることで
+// Next.js Data Cache が Lambda 間で共有され、DB 接続頻度が激減する。
+// build 時は1回だけ prerender が走る（同時 prerender は /meetings, /people と計3本程度）。
+export const revalidate = 60;
 
 // PR1: generateMetadata を静的 metadata に置き換え
 // 理由: generateMetadata() は build 時に必ず実行され、内部で DB に接続していた。
@@ -41,30 +42,11 @@ const CATEGORY_KEYWORDS: Record<string, string[]> = {
 // ──────────────────────────────────────────
 // トップページ専用データ取得
 // ──────────────────────────────────────────
-// PR3: unstable_cache をすべて外し、plain async 関数にまとめた。
-//
-// 変更理由:
-//   unstable_cache でラップされた関数は、build 時にキャッシュを埋めようとして
-//   DBへの接続を試みる。さらに getLatestMeetings の中で getCachedLatestDate を
-//   呼ぶ「nested cache」になっており、build 時にDBへの接続が多段階で走っていた。
-//   これが connection_limit=1 の pooled 接続環境での競合・タイムアウトの要因だった。
-//
-//   plain async 関数にすることで、unstable_cache による自動実行をなくし、
-//   build 時の挙動を単純化して接続競合の要因を減らすことが目的。
-//
-// キャッシュ:
-//   force-dynamic のため Next.js のページキャッシュは効かない。
-//   代わりにインメモリキャッシュ（TTL 60秒）で DB アクセス回数を抑制する。
-//   同時リクエスト時は in-flight の Promise を共有し、二重実行を防ぐ。
-
-// ── インメモリキャッシュ（connection_limit=1 対策） ──
-// force-dynamic を維持したまま、runtime の DB アクセス頻度を下げる。
-// - TTL 60秒: 期限内はキャッシュを返し、DB に行かない
-// - in-flight 共有: 同時アクセスで同じ Promise を使い回し、二重クエリを防ぐ
-const CACHE_TTL_MS = 60_000;
-let cachedData: HomePageData | null = null;
-let cachedAt = 0;
-let inflight: Promise<HomePageData | null> | null = null;
+// unstable_cache で Data Cache に保存する。
+// - Lambda 間で共有されるため、同時アクセスでも DB 接続は revalidate 間隔に1回だけ
+// - force-dynamic + in-memory cache は「1 Lambda 内の最適化」だったが、
+//   unstable_cache + revalidate は「全 Lambda 共通の最適化」になる
+// - $transaction は維持し、1回の DB アクセスで全クエリを実行する
 
 type PartyBalanceItem = {
   house: string;
@@ -215,28 +197,14 @@ async function getHomePageData(): Promise<HomePageData | null> {
   });
 }
 
-/** キャッシュ付きラッパー。TTL 内はキャッシュを返し、同時リクエストは Promise を共有する */
-async function getCachedHomePageData(): Promise<HomePageData | null> {
-  // TTL 内ならキャッシュを返す
-  if (cachedData && Date.now() - cachedAt < CACHE_TTL_MS) {
-    return cachedData;
-  }
-  // 別リクエストが既に取得中なら、その Promise を待つ（二重クエリ防止）
-  if (inflight) {
-    return inflight;
-  }
-  // DB 取得を開始し、Promise を共有する
-  inflight = getHomePageData()
-    .then((data) => {
-      cachedData = data;
-      cachedAt = Date.now();
-      return data;
-    })
-    .finally(() => {
-      inflight = null;
-    });
-  return inflight;
-}
+// unstable_cache: Next.js Data Cache に保存。Lambda 間で共有される。
+// revalidate: 60 秒でキャッシュを再検証（ページの revalidate と合わせる）。
+// tags: 将来的に on-demand revalidation が必要になった場合に使える。
+const getCachedHomePageData = unstable_cache(
+  getHomePageData,
+  ["home-page-data"],
+  { revalidate: 60 }
+);
 
 // ──────────────────────────────────────────
 // ヘルパー関数（会議データの集計）
@@ -419,8 +387,18 @@ function PartyBalanceChart({
 }
 
 export default async function HomePage() {
-  // PR3: getHomePageData にまとめた plain async 関数を呼ぶ（インメモリキャッシュ経由）
-  const data = await getCachedHomePageData();
+  // unstable_cache は JSON シリアライズするため Date が string になる。
+  // new Date() で復元する。
+  const raw = await getCachedHomePageData();
+  const data = raw
+    ? {
+        ...raw,
+        date: new Date(raw.date),
+        editorNote: raw.editorNote
+          ? { ...raw.editorNote, targetDate: new Date(raw.editorNote.targetDate) }
+          : null,
+      }
+    : null;
   const { meetings, date, partyBalance, allTopics, recentBills, peopleKeywords, editorNote } = data ?? {};
 
   if (!data || !date || !meetings || meetings.length === 0) {
