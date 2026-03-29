@@ -42,13 +42,13 @@ const CATEGORY_KEYWORDS: Record<string, string[]> = {
 };
 
 // ──────────────────────────────────────────
-// トップページ専用データ取得
+// トップページ専用データ取得（独立 cache 分割）
 // ──────────────────────────────────────────
-// unstable_cache で Data Cache に保存する。
-// - Lambda 間で共有されるため、同時アクセスでも DB 接続は revalidate 間隔に1回だけ
-// - force-dynamic + in-memory cache は「1 Lambda 内の最適化」だったが、
-//   unstable_cache + revalidate は「全 Lambda 共通の最適化」になる
-// - $transaction は維持し、1回の DB アクセスで全クエリを実行する
+// 4つの独立 unstable_cache に分割する。
+// - cache miss が分散し、1回の DB アクセスが1〜2クエリで済む
+// - TTL を変更頻度に合わせて分けることで cache miss 自体の頻度を減らす
+// - cache hit 時は DB に行かないため接続競合が起きない
+// - HomePage 側では直列 await で呼び出す（connection_limit=1 のため同時 miss 時の競合を避ける）
 
 type PartyBalanceItem = {
   house: string;
@@ -82,128 +82,123 @@ type EditorNote = {
   editedText: string;
 } | null;
 
-type HomePageData = {
-  date: Date;
-  meetings: HomeMeeting[];
-  partyBalance: PartyBalanceItem[];
-  allTopics: string[];
-  recentBills: Array<{ billCode: string; title: string; status: string }>;
-  peopleKeywords: string[];
-  editorNote: EditorNote;
-};
-
-async function getHomePageData(): Promise<HomePageData | null> {
-  // read only クエリを個別に実行する。
-  // 以前は $transaction でまとめていたが、pooled URL (PgBouncer transaction mode) では
-  // interactive transaction の開始自体がタイムアウトする (P2028) ため外した。
-  // unstable_cache で Data Cache に乗るため、DB アクセスは revalidate 間隔に1回だけ。
-
-  // 最新日付を1回だけ取得
-  const latest = await prisma.meeting.findFirst({
-    orderBy: { date: "desc" },
-    select: { date: true },
-  });
-  if (!latest) return null;
-  const date = latest.date;
-
-  // 最新日の会議一覧
-  const meetings = await prisma.meeting.findMany({
-    where: { date },
-    orderBy: { nameOfMeeting: "asc" },
-    select: {
-      id: true,
-      house: true,
-      nameOfMeeting: true,
-      summary: {
-        select: {
-          keyTopics: true,
-          bullets: true,
-          agreementPoints: true,
-          conflictPoints: true,
-          impactNotes: true,
-        },
-      },
-      _count: { select: { speeches: true } },
-    },
-  });
-
-  // 勢力図
-  const seats = await prisma.partySeat.findMany({
-    orderBy: [{ house: "asc" }, { seats: "desc" }],
-    include: { party: { select: { shortName: true, color: true } } },
-  });
-  const byHouse = new Map<string, typeof seats>();
-  for (const s of seats) {
-    if (!byHouse.has(s.house)) byHouse.set(s.house, []);
-    byHouse.get(s.house)!.push(s);
-  }
-  const partyBalance: PartyBalanceItem[] = [];
-  for (const [house, houseSeats] of Array.from(byHouse)) {
-    const latestAsOf = houseSeats.reduce(
-      (max, s) => (s.asOf.getTime() > max.getTime() ? s.asOf : max),
-      houseSeats[0].asOf
-    );
-    const latestSeats = houseSeats
-      .filter((s) => s.asOf.getTime() === latestAsOf.getTime())
-      .sort((a, b) => b.seats - a.seats);
-    const totalSeats = house === "衆議院" ? 465 : 248;
-    const majority = Math.floor(totalSeats / 2) + 1;
-    partyBalance.push({
-      house,
-      totalSeats,
-      majority,
-      parties: latestSeats.map((s) => ({
-        shortName: s.party.shortName,
-        color: s.party.color,
-        seats: s.seats,
-        pct: Math.round((s.seats / totalSeats) * 100),
-      })),
+// ── 1. 最新日の会議 + トピック集計（60秒） ──
+const getLatestMeetings = unstable_cache(
+  async () => {
+    const latest = await prisma.meeting.findFirst({
+      orderBy: { date: "desc" },
+      select: { date: true },
     });
-  }
-  partyBalance.sort((a, b) => (a.house === "衆議院" ? -1 : 1));
+    if (!latest) return null;
+    const date = latest.date;
 
-  // allTopics: meetings の keyTopics から集計（DB再取得なし）
-  const topicCounts = new Map<string, number>();
-  for (const m of meetings) {
-    for (const t of m.summary?.keyTopics ?? []) {
-      topicCounts.set(t, (topicCounts.get(t) ?? 0) + 1);
+    const meetings = await prisma.meeting.findMany({
+      where: { date },
+      orderBy: { nameOfMeeting: "asc" },
+      select: {
+        id: true,
+        house: true,
+        nameOfMeeting: true,
+        summary: {
+          select: {
+            keyTopics: true,
+            bullets: true,
+            agreementPoints: true,
+            conflictPoints: true,
+            impactNotes: true,
+          },
+        },
+        _count: { select: { speeches: true } },
+      },
+    });
+
+    // allTopics: meetings の keyTopics から集計（DB アクセスなし）
+    const topicCounts = new Map<string, number>();
+    for (const m of meetings) {
+      for (const t of m.summary?.keyTopics ?? []) {
+        topicCounts.set(t, (topicCounts.get(t) ?? 0) + 1);
+      }
     }
-  }
-  const allTopics = Array.from(topicCounts.entries())
-    .sort((a, b) => b[1] - a[1])
-    .map(([t]) => t);
+    const allTopics = Array.from(topicCounts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .map(([t]) => t);
 
-  // 最近の法案
-  const recentBills = await prisma.bill.findMany({
-    orderBy: [
-      { enactedAt: { sort: "desc", nulls: "last" } },
-      { passedAt: { sort: "desc", nulls: "last" } },
-      { submittedAt: { sort: "desc", nulls: "last" } },
-    ],
-    take: 5,
-    select: { billCode: true, title: true, status: true },
-  });
-
-  // 人物キーワード: 重いため一旦スキップ
-  const peopleKeywords: string[] = [];
-
-  // 管理者まとめ
-  const editorNote = await prisma.dailyEditorNote.findFirst({
-    where: { status: "published" },
-    orderBy: { targetDate: "desc" },
-    select: { targetDate: true, title: true, introText: true, editedText: true },
-  });
-
-  return { date, meetings, partyBalance, allTopics, recentBills, peopleKeywords, editorNote };
-}
-
-// unstable_cache: Next.js Data Cache に保存。Lambda 間で共有される。
-// revalidate: 60 秒でキャッシュを再検証（ページの revalidate と合わせる）。
-// tags: 将来的に on-demand revalidation が必要になった場合に使える。
-const getCachedHomePageData = unstable_cache(
-  getHomePageData,
-  ["home-page-data"],
+    return { date, meetings, allTopics };
+  },
+  ["home-meetings"],
   { revalidate: 60 }
+);
+
+// ── 2. 勢力図（1時間） ──
+const getPartyBalance = unstable_cache(
+  async (): Promise<PartyBalanceItem[]> => {
+    const seats = await prisma.partySeat.findMany({
+      orderBy: [{ house: "asc" }, { seats: "desc" }],
+      include: { party: { select: { shortName: true, color: true } } },
+    });
+    const byHouse = new Map<string, typeof seats>();
+    for (const s of seats) {
+      if (!byHouse.has(s.house)) byHouse.set(s.house, []);
+      byHouse.get(s.house)!.push(s);
+    }
+    const partyBalance: PartyBalanceItem[] = [];
+    for (const [house, houseSeats] of Array.from(byHouse)) {
+      const latestAsOf = houseSeats.reduce(
+        (max, s) => (s.asOf.getTime() > max.getTime() ? s.asOf : max),
+        houseSeats[0].asOf
+      );
+      const latestSeats = houseSeats
+        .filter((s) => s.asOf.getTime() === latestAsOf.getTime())
+        .sort((a, b) => b.seats - a.seats);
+      const totalSeats = house === "衆議院" ? 465 : 248;
+      const majority = Math.floor(totalSeats / 2) + 1;
+      partyBalance.push({
+        house,
+        totalSeats,
+        majority,
+        parties: latestSeats.map((s) => ({
+          shortName: s.party.shortName,
+          color: s.party.color,
+          seats: s.seats,
+          pct: Math.round((s.seats / totalSeats) * 100),
+        })),
+      });
+    }
+    partyBalance.sort((a, b) => (a.house === "衆議院" ? -1 : 1));
+    return partyBalance;
+  },
+  ["home-party-balance"],
+  { revalidate: 3600 }
+);
+
+// ── 3. 最近の法案（1時間） ──
+const getRecentBills = unstable_cache(
+  async () => {
+    return prisma.bill.findMany({
+      orderBy: [
+        { enactedAt: { sort: "desc", nulls: "last" } },
+        { passedAt: { sort: "desc", nulls: "last" } },
+        { submittedAt: { sort: "desc", nulls: "last" } },
+      ],
+      take: 5,
+      select: { billCode: true, title: true, status: true },
+    });
+  },
+  ["home-recent-bills"],
+  { revalidate: 3600 }
+);
+
+// ── 4. 管理者まとめ（5分） ──
+const getEditorNote = unstable_cache(
+  async (): Promise<EditorNote> => {
+    return prisma.dailyEditorNote.findFirst({
+      where: { status: "published" },
+      orderBy: { targetDate: "desc" },
+      select: { targetDate: true, title: true, introText: true, editedText: true },
+    });
+  },
+  ["home-editor-note"],
+  { revalidate: 300 }
 );
 
 // ──────────────────────────────────────────
@@ -211,7 +206,7 @@ const getCachedHomePageData = unstable_cache(
 // ──────────────────────────────────────────
 
 function aggregateTopics(
-  meetings: HomePageData["meetings"]
+  meetings: HomeMeeting[]
 ): string[] {
   const counts = new Map<string, number>();
   for (const m of meetings) {
@@ -226,7 +221,7 @@ function aggregateTopics(
 }
 
 function aggregateAgreements(
-  meetings: HomePageData["meetings"]
+  meetings: HomeMeeting[]
 ): Array<{ text: string; meeting: string }> {
   return meetings.flatMap((m) =>
     (m.summary?.agreementPoints ?? []).map((a) => ({
@@ -237,7 +232,7 @@ function aggregateAgreements(
 }
 
 function aggregateHighlights(
-  meetings: HomePageData["meetings"]
+  meetings: HomeMeeting[]
 ): Array<{ text: string; meeting: string; type: "conflict" | "impact" }> {
   const items: Array<{
     text: string;
@@ -316,7 +311,7 @@ function NewsArticleJsonLd({
 function PartyBalanceChart({
   balanceData,
 }: {
-  balanceData: HomePageData["partyBalance"];
+  balanceData: PartyBalanceItem[];
 }) {
   if (balanceData.length === 0) return null;
 
@@ -387,21 +382,24 @@ function PartyBalanceChart({
 }
 
 export default async function HomePage() {
-  // unstable_cache は JSON シリアライズするため Date が string になる。
-  // new Date() で復元する。
-  const raw = await getCachedHomePageData();
-  const data = raw
-    ? {
-        ...raw,
-        date: new Date(raw.date),
-        editorNote: raw.editorNote
-          ? { ...raw.editorNote, targetDate: new Date(raw.editorNote.targetDate) }
-          : null,
-      }
-    : null;
-  const { meetings, date, partyBalance, allTopics, recentBills, peopleKeywords, editorNote } = data ?? {};
+  // 4つの独立 cache を直列で呼び出す。
+  // cache hit 時は DB に行かない。cache miss 時も1クエリずつなので接続競合しにくい。
+  // unstable_cache は JSON シリアライズするため Date は string になる → new Date() で復元。
 
-  if (!data || !date || !meetings || meetings.length === 0) {
+  const rawMeetings = await getLatestMeetings();
+  const partyBalance = await getPartyBalance();
+  const recentBills = await getRecentBills();
+  const rawEditorNote = await getEditorNote();
+
+  // Date 復元
+  const date = rawMeetings ? new Date(rawMeetings.date) : null;
+  const meetings = rawMeetings?.meetings ?? [];
+  const allTopics = rawMeetings?.allTopics ?? [];
+  const editorNote = rawEditorNote
+    ? { ...rawEditorNote, targetDate: new Date(rawEditorNote.targetDate) }
+    : null;
+
+  if (!date || meetings.length === 0) {
     return (
       <div className="mx-auto max-w-5xl px-4 py-16">
         <NoData message="まだデータがありません。バッチジョブを実行してください。" />
@@ -409,7 +407,7 @@ export default async function HomePage() {
     );
   }
 
-  const safePeopleKeywords = peopleKeywords ?? [];
+  const safePeopleKeywords: string[] = [];
   const safeRecentBills = recentBills ?? [];
   const safePartyBalance = partyBalance ?? [];
 
