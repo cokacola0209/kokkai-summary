@@ -91,6 +91,13 @@ type HomeMeeting = Prisma.MeetingGetPayload<{
   };
 }>;
 
+type EditorNote = {
+  targetDate: Date;
+  title: string;
+  introText: string;
+  editedText: string;
+} | null;
+
 type HomePageData = {
   date: Date;
   meetings: HomeMeeting[];
@@ -98,6 +105,7 @@ type HomePageData = {
   allTopics: string[];
   recentBills: Array<{ billCode: string; title: string; status: string }>;
   peopleKeywords: string[];
+  editorNote: EditorNote;
 };
 
 async function getHomePageData(): Promise<HomePageData | null> {
@@ -194,7 +202,15 @@ async function getHomePageData(): Promise<HomePageData | null> {
   // UIは既存の「人物キーワードはまだ少なめです」フォールバックがそのまま表示される。
   const peopleKeywords: string[] = [];
 
-  return { date, meetings, partyBalance, allTopics, recentBills, peopleKeywords };
+  // 管理者まとめ: EditorNoteCard がキャッシュ外で毎リクエスト DB を叩いていた問題を解消。
+  // ここで取得して in-memory cache の保護下に入れる。
+  const editorNote = await prisma.dailyEditorNote.findFirst({
+    where: { status: "published" },
+    orderBy: { targetDate: "desc" },
+    select: { targetDate: true, title: true, introText: true, editedText: true },
+  });
+
+  return { date, meetings, partyBalance, allTopics, recentBills, peopleKeywords, editorNote };
 }
 
 /** キャッシュ付きラッパー。TTL 内はキャッシュを返し、同時リクエストは Promise を共有する */
@@ -403,7 +419,7 @@ function PartyBalanceChart({
 export default async function HomePage() {
   // PR3: getHomePageData にまとめた plain async 関数を呼ぶ（インメモリキャッシュ経由）
   const data = await getCachedHomePageData();
-  const { meetings, date, partyBalance, allTopics, recentBills, peopleKeywords } = data ?? {};
+  const { meetings, date, partyBalance, allTopics, recentBills, peopleKeywords, editorNote } = data ?? {};
 
   if (!data || !date || !meetings || meetings.length === 0) {
     return (
@@ -459,7 +475,7 @@ export default async function HomePage() {
         </div>
 
         {/* 管理者まとめ */}
-        <EditorNoteCard />
+        <EditorNoteCard note={editorNote ?? null} />
 
         {/* ── 統計バー ── */}
         <div className="mb-8 grid grid-cols-2 gap-3 fade-in-up delay-1 sm:grid-cols-4">
