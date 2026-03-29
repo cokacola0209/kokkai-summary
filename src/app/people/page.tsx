@@ -8,7 +8,7 @@ export const metadata: Metadata = {
   description: "会議に出てきた人物を政党・会派ごとに一覧で見られます。",
 };
 
-export const revalidate = 3600;
+// 暫定: build 時の prerender を止めて pool timeout を回避する（/` の unstable_cache 実験評価用）
 export const dynamic = "force-dynamic";
 
 async function getPeopleIndex() {
