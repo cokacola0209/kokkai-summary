@@ -3,7 +3,6 @@ import Link from "next/link";
 import { AccordionDetails } from "@/components/Accordion";
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
-import { unstable_cache } from "next/cache";
 import {
   SummaryCard,
   NoData,
@@ -94,106 +93,105 @@ type HomeData = {
   editorNote: EditorNote;
 };
 
-const getHomeData = unstable_cache(
-  async (): Promise<HomeData | null> => {
-    // ── 1. 最新日付 ──
-    const latest = await prisma.meeting.findFirst({
-      orderBy: { date: "desc" },
-      select: { date: true },
-    });
-    if (!latest) return null;
-    const date = latest.date;
+// unstable_cache を外した純粋な直列取得。
+// revalidation 機構を経由しないため、framework 起因の接続競合を排除できる。
+// force-dynamic なので毎リクエスト実行されるが、クエリは全て軽量。
+async function getHomeData(): Promise<HomeData | null> {
+  // ── 1. 最新日付 ──
+  const latest = await prisma.meeting.findFirst({
+    orderBy: { date: "desc" },
+    select: { date: true },
+  });
+  if (!latest) return null;
+  const date = latest.date;
 
-    // ── 2. 最新日の会議一覧 ──
-    const meetings = await prisma.meeting.findMany({
-      where: { date },
-      orderBy: { nameOfMeeting: "asc" },
-      select: {
-        id: true,
-        house: true,
-        nameOfMeeting: true,
-        summary: {
-          select: {
-            keyTopics: true,
-            bullets: true,
-            agreementPoints: true,
-            conflictPoints: true,
-            impactNotes: true,
-          },
+  // ── 2. 最新日の会議一覧 ──
+  const meetings = await prisma.meeting.findMany({
+    where: { date },
+    orderBy: { nameOfMeeting: "asc" },
+    select: {
+      id: true,
+      house: true,
+      nameOfMeeting: true,
+      summary: {
+        select: {
+          keyTopics: true,
+          bullets: true,
+          agreementPoints: true,
+          conflictPoints: true,
+          impactNotes: true,
         },
-        _count: { select: { speeches: true } },
       },
-    });
+      _count: { select: { speeches: true } },
+    },
+  });
 
-    // allTopics: meetings の keyTopics から集計（DB アクセスなし）
-    const topicCounts = new Map<string, number>();
-    for (const m of meetings) {
-      for (const t of m.summary?.keyTopics ?? []) {
-        topicCounts.set(t, (topicCounts.get(t) ?? 0) + 1);
-      }
+  // allTopics: meetings の keyTopics から集計（DB アクセスなし）
+  const topicCounts = new Map<string, number>();
+  for (const m of meetings) {
+    for (const t of m.summary?.keyTopics ?? []) {
+      topicCounts.set(t, (topicCounts.get(t) ?? 0) + 1);
     }
-    const allTopics = Array.from(topicCounts.entries())
-      .sort((a, b) => b[1] - a[1])
-      .map(([t]) => t);
+  }
+  const allTopics = Array.from(topicCounts.entries())
+    .sort((a, b) => b[1] - a[1])
+    .map(([t]) => t);
 
-    // ── 3. 勢力図 ──
-    const seats = await prisma.partySeat.findMany({
-      orderBy: [{ house: "asc" }, { seats: "desc" }],
-      include: { party: { select: { shortName: true, color: true } } },
+  // ── 3. 勢力図 ──
+  const seats = await prisma.partySeat.findMany({
+    orderBy: [{ house: "asc" }, { seats: "desc" }],
+    include: { party: { select: { shortName: true, color: true } } },
+  });
+  const byHouse = new Map<string, typeof seats>();
+  for (const s of seats) {
+    if (!byHouse.has(s.house)) byHouse.set(s.house, []);
+    byHouse.get(s.house)!.push(s);
+  }
+  const partyBalance: PartyBalanceItem[] = [];
+  for (const [house, houseSeats] of Array.from(byHouse)) {
+    const latestAsOf = houseSeats.reduce(
+      (max, s) => (s.asOf.getTime() > max.getTime() ? s.asOf : max),
+      houseSeats[0].asOf
+    );
+    const latestSeats = houseSeats
+      .filter((s) => s.asOf.getTime() === latestAsOf.getTime())
+      .sort((a, b) => b.seats - a.seats);
+    const totalSeats = house === "衆議院" ? 465 : 248;
+    const majority = Math.floor(totalSeats / 2) + 1;
+    partyBalance.push({
+      house,
+      totalSeats,
+      majority,
+      parties: latestSeats.map((s) => ({
+        shortName: s.party.shortName,
+        color: s.party.color,
+        seats: s.seats,
+        pct: Math.round((s.seats / totalSeats) * 100),
+      })),
     });
-    const byHouse = new Map<string, typeof seats>();
-    for (const s of seats) {
-      if (!byHouse.has(s.house)) byHouse.set(s.house, []);
-      byHouse.get(s.house)!.push(s);
-    }
-    const partyBalance: PartyBalanceItem[] = [];
-    for (const [house, houseSeats] of Array.from(byHouse)) {
-      const latestAsOf = houseSeats.reduce(
-        (max, s) => (s.asOf.getTime() > max.getTime() ? s.asOf : max),
-        houseSeats[0].asOf
-      );
-      const latestSeats = houseSeats
-        .filter((s) => s.asOf.getTime() === latestAsOf.getTime())
-        .sort((a, b) => b.seats - a.seats);
-      const totalSeats = house === "衆議院" ? 465 : 248;
-      const majority = Math.floor(totalSeats / 2) + 1;
-      partyBalance.push({
-        house,
-        totalSeats,
-        majority,
-        parties: latestSeats.map((s) => ({
-          shortName: s.party.shortName,
-          color: s.party.color,
-          seats: s.seats,
-          pct: Math.round((s.seats / totalSeats) * 100),
-        })),
-      });
-    }
-    partyBalance.sort((a, b) => (a.house === "衆議院" ? -1 : 1));
+  }
+  partyBalance.sort((a, b) => (a.house === "衆議院" ? -1 : 1));
 
-    // ── 4. 最近の法案 ──
-    const recentBills = await prisma.bill.findMany({
-      orderBy: [
-        { enactedAt: { sort: "desc", nulls: "last" } },
-        { passedAt: { sort: "desc", nulls: "last" } },
-        { submittedAt: { sort: "desc", nulls: "last" } },
-      ],
-      take: 5,
-      select: { billCode: true, title: true, status: true },
-    });
+  // ── 4. 最近の法案 ──
+  const recentBills = await prisma.bill.findMany({
+    orderBy: [
+      { enactedAt: { sort: "desc", nulls: "last" } },
+      { passedAt: { sort: "desc", nulls: "last" } },
+      { submittedAt: { sort: "desc", nulls: "last" } },
+    ],
+    take: 5,
+    select: { billCode: true, title: true, status: true },
+  });
 
-    // ── 5. 管理者まとめ ──
-    const editorNote = await prisma.dailyEditorNote.findFirst({
-      where: { status: "published" },
-      orderBy: { targetDate: "desc" },
-      select: { targetDate: true, title: true, introText: true, editedText: true },
-    });
+  // ── 5. 管理者まとめ ──
+  const editorNote = await prisma.dailyEditorNote.findFirst({
+    where: { status: "published" },
+    orderBy: { targetDate: "desc" },
+    select: { targetDate: true, title: true, introText: true, editedText: true },
+  });
 
-    return { date, meetings, allTopics, partyBalance, recentBills, editorNote };
-  },
-  ["home-data"],
-  { revalidate: 60 }
-);
+  return { date, meetings, allTopics, partyBalance, recentBills, editorNote };
+}
 
 // ──────────────────────────────────────────
 // ヘルパー関数（会議データの集計）
@@ -376,19 +374,15 @@ function PartyBalanceChart({
 }
 
 export default async function HomePage() {
-  // 1つの unstable_cache から全データを取得。
-  // cache hit 時は DB に行かない。cache miss 時も内部で直列実行なので接続は常に1本。
-  // unstable_cache は JSON シリアライズするため Date は string になる → new Date() で復元。
-  const raw = await getHomeData();
+  // unstable_cache なし。Prisma が直接 Date を返すので復元不要。
+  const data = await getHomeData();
 
-  const date = raw ? new Date(raw.date) : null;
-  const meetings = raw?.meetings ?? [];
-  const allTopics = raw?.allTopics ?? [];
-  const partyBalance = raw?.partyBalance ?? [];
-  const recentBills = raw?.recentBills ?? [];
-  const editorNote = raw?.editorNote
-    ? { ...raw.editorNote, targetDate: new Date(raw.editorNote.targetDate) }
-    : null;
+  const date = data?.date ?? null;
+  const meetings = data?.meetings ?? [];
+  const allTopics = data?.allTopics ?? [];
+  const partyBalance = data?.partyBalance ?? [];
+  const recentBills = data?.recentBills ?? [];
+  const editorNote = data?.editorNote ?? null;
 
   if (!date || meetings.length === 0) {
     return (
