@@ -177,7 +177,7 @@ const getAvailableYearMonths = unstable_cache(
       entry.months.sort((a, b) => b.month - a.month);
     }
 
-    return years;
+    return Object.fromEntries(years);
   },
   ["available-year-months"],
   { revalidate: 3600 } // 1時間キャッシュ
@@ -355,7 +355,7 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Sea
                   href={buildMeetingsHref({ house, topic, person, committee, party })}
                   active={!year}
                 />
-                {Array.from(yearMonths.entries()).map(([y, data]) => (
+                {Object.entries(yearMonths).map(([y, data]) => (
                   <FilterLink
                     key={y}
                     label={`${y}年 (${data.total})`}
@@ -365,14 +365,14 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Sea
                 ))}
               </FilterGroup>
 
-              {year && yearMonths.has(Number(year)) && (
+              {year && yearMonths[Number(year)] !== undefined && (
                 <FilterGroup title={`${year}年の月別`}>
                   <FilterLink
                     label={`${year}年すべて`}
                     href={buildMeetingsHref({ house, topic, person, committee, party, year })}
                     active={!!year && !month}
                   />
-                  {yearMonths.get(Number(year))!.months.map(({ month: m, count }) => (
+                  {yearMonths[Number(year)]!.months.map(({ month: m, count }) => (
                     <FilterLink
                       key={m}
                       label={`${m}月 (${count})`}
