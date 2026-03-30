@@ -1,11 +1,13 @@
-import { prisma } from "@/lib/prisma";
+type EditorNoteProps = {
+  note: {
+    targetDate: Date;
+    title: string;
+    introText: string;
+    editedText: string;
+  } | null;
+};
 
-export async function EditorNoteCard() {
-  const note = await prisma.dailyEditorNote.findFirst({
-    where: { status: "published" },
-    orderBy: { targetDate: "desc" },
-  });
-
+export function EditorNoteCard({ note }: EditorNoteProps) {
   if (!note) return null;
 
   const dateStr = note.targetDate.toLocaleDateString("ja-JP", {

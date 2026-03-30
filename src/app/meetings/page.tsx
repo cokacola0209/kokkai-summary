@@ -177,7 +177,9 @@ const getAvailableYearMonths = unstable_cache(
       entry.months.sort((a, b) => b.month - a.month);
     }
 
-    return years;
+    // unstable_cache は JSON シリアライズするため Map は壊れる。
+    // plain object に変換して返す。
+    return Object.fromEntries(years);
   },
   ["available-year-months"],
   { revalidate: 3600 } // 1時間キャッシュ
@@ -252,25 +254,18 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Sea
     ],
   };
 
-  // ✅ 変更⑥: Promise.all を「必須クエリ」と「キャッシュ済みクエリ」に分離
-  // 重い3関数（filterOptions/yearMonths/todayMeetings）はキャッシュ関数化済みなので
-  // 同時発火しても実態はDBを叩かない（キャッシュヒット時）。
-  // 必須クエリは count×2 + findMany の3本のみ。
-  const [totalAll, total, meetings] = await Promise.all([
-    prisma.meeting.count(),
-    prisma.meeting.count({ where }),
-    prisma.meeting.findMany({
-      where,
-      orderBy: { date: "desc" },
-      skip: (page - 1) * PAGE_SIZE,
-      take: PAGE_SIZE,
-      include: { summary: { select: { agreementPoints: true, conflictPoints: true, keyTopics: true } } },
-    }),
-  ]);
+  // 直列実行: connection_limit=1 環境では同時的な DB 要求が
+  // 接続競合を悪化させる可能性が高いため、Promise.all をやめて直列 await にする。
+  const totalAll = await prisma.meeting.count();
+  const total = await prisma.meeting.count({ where });
+  const meetings = await prisma.meeting.findMany({
+    where,
+    orderBy: { date: "desc" },
+    skip: (page - 1) * PAGE_SIZE,
+    take: PAGE_SIZE,
+    include: { summary: { select: { agreementPoints: true, conflictPoints: true, keyTopics: true } } },
+  });
 
-  // ✅ houses は groupBy をやめ、count から導出（クエリ1本削減）
-  // groupBy は集計クエリで重め。院は「衆議院」「参議院」の2択なので固定でも可。
-  // ただし互換性のため別途取得するが、Promise.all から外して逐次実行に。
   const houses = await prisma.meeting.groupBy({
     by: ["house"],
     _count: true,
@@ -362,7 +357,7 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Sea
                   href={buildMeetingsHref({ house, topic, person, committee, party })}
                   active={!year}
                 />
-                {Array.from(yearMonths.entries()).map(([y, data]) => (
+                {Object.entries(yearMonths).map(([y, data]) => (
                   <FilterLink
                     key={y}
                     label={`${y}年 (${data.total})`}
@@ -372,14 +367,14 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Sea
                 ))}
               </FilterGroup>
 
-              {year && yearMonths.has(Number(year)) && (
+              {year && yearMonths[Number(year)] !== undefined && (
                 <FilterGroup title={`${year}年の月別`}>
                   <FilterLink
                     label={`${year}年すべて`}
                     href={buildMeetingsHref({ house, topic, person, committee, party, year })}
                     active={!!year && !month}
                   />
-                  {yearMonths.get(Number(year))!.months.map(({ month: m, count }) => (
+                  {yearMonths[Number(year)]!.months.map(({ month: m, count }: { month: number; count: number }) => (
                     <FilterLink
                       key={m}
                       label={`${m}月 (${count})`}

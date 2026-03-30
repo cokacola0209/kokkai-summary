@@ -25,7 +25,9 @@ export default async function TopicPage({ params }: Props) {
       keyTopics: { has: tag },
     },
     include: {
-      meeting: true,
+      meeting: {
+        select: { id: true, date: true, house: true, nameOfMeeting: true },
+      },
     },
     orderBy: {
       meeting: { date: "desc" },
