@@ -144,7 +144,7 @@ const getFilterOptions = unstable_cache(
 
     return { topicOptions, personOptions, committeeOptions, partyOptions };
   },
-  ["filter-options"],
+  ["filter-options-v2"],
   { revalidate: 3600 } // 1時間キャッシュ
 );
 
@@ -179,7 +179,7 @@ const getAvailableYearMonths = unstable_cache(
 
     return Object.fromEntries(years);
   },
-  ["available-year-months"],
+  ["available-year-months-v2"],
   { revalidate: 3600 } // 1時間キャッシュ
 );
 
@@ -202,7 +202,7 @@ const getTodayMeetings = unstable_cache(
       },
     });
   },
-  ["today-meetings"],
+  ["today-meetings-v2"],
   { revalidate: 300 } // 5分キャッシュ
 );
 
