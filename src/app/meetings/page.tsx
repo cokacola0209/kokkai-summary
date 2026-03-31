@@ -524,9 +524,15 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Sea
             })}
           </div>
 
-          <nav className="mt-10 flex items-center justify-center gap-2">
+          <nav className="mt-10 flex flex-wrap items-center justify-center gap-2">
             {page > 1 && <PaginationLink href={buildMeetingsHref({ house, topic, person, committee, party, year, month, page: String(page - 1) })} label="← 前へ" />}
-            <span className="px-4 py-2 text-sm font-medium text-slate-500">{page} / {totalPages}</span>
+            {Array.from({ length: totalPages }, (_, i) => i + 1).map((n) =>
+              n === page ? (
+                <span key={n} className="rounded-lg bg-[#1a2744] px-4 py-2 text-sm font-medium text-white shadow-sm">{n}</span>
+              ) : (
+                <PaginationLink key={n} href={buildMeetingsHref({ house, topic, person, committee, party, year, month, page: String(n) })} label={String(n)} />
+              )
+            )}
             {page < totalPages && <PaginationLink href={buildMeetingsHref({ house, topic, person, committee, party, year, month, page: String(page + 1) })} label="次へ →" />}
           </nav>
         </>
