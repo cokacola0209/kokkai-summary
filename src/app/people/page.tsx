@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { unstable_cache } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import PeoplePageClient from "@/components/PeoplePageClient";
 
@@ -8,35 +9,41 @@ export const metadata: Metadata = {
   description: "会議に出てきた人物を政党・会派ごとに一覧で見られます。",
 };
 
-// 暫定: build 時の prerender を止めて pool timeout を回避する（/` の unstable_cache 実験評価用）
+// build 時の prerender を止めて pool timeout (P2024) を回避する。
+// データ取得は unstable_cache (Data Cache) でラップしているため、
+// force-dynamic でも revalidate 間隔に1回しか DB を叩かない。
 export const dynamic = "force-dynamic";
 
-async function getPeopleIndex() {
-  const persons = await prisma.person.findMany({
-    include: {
-      party: {
-        select: {
-          name: true,
-          shortName: true,
-          color: true,
+const getPeopleIndex = unstable_cache(
+  async () => {
+    const persons = await prisma.person.findMany({
+      include: {
+        party: {
+          select: {
+            name: true,
+            shortName: true,
+            color: true,
+          },
+        },
+        _count: {
+          select: { speeches: true },
         },
       },
-      _count: {
-        select: { speeches: true },
-      },
-    },
-  });
+    });
 
-  return persons
-    .filter((p) => p._count.speeches > 0)
-    .map((p) => ({
-      name: p.name,
-      count: p._count.speeches,
-      partyName: p.party?.name ?? null,
-      partyShortName: p.party?.shortName ?? null,
-      partyColor: p.party?.color ?? null,
-    }));
-}
+    return persons
+      .filter((p) => p._count.speeches > 0)
+      .map((p) => ({
+        name: p.name,
+        count: p._count.speeches,
+        partyName: p.party?.name ?? null,
+        partyShortName: p.party?.shortName ?? null,
+        partyColor: p.party?.color ?? null,
+      }));
+  },
+  ["people-index"],
+  { revalidate: 3600 }
+);
 
 export default async function PeoplePage() {
   const people = await getPeopleIndex();
