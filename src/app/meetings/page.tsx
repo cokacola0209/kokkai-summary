@@ -17,10 +17,11 @@ export const metadata: Metadata = {
     "国会会議録の日付順一覧。テーマ・人物・委員会・院・会派・期間で絞り込みながら要点を見やすく確認できます。",
 };
 
-// ✅ 変更②: PAGE_SIZE を 200 → 60 に削減
-// 200件は1クエリで大量データを転送しDBへの負荷も高い。
-// 60件なら転送量を抑えつつ、1ページに十分な日付グループを表示できる。
-const PAGE_SIZE = 60;
+// ✅ 変更②: ページネーションを日付グループベースに変更
+// 会議件数ベース（skip/take）だと同日に多数の委員会が開催される国会データでは
+// 1ページあたりの日付グループ数が不安定になる。
+// 20日分ずつ表示することで、ページごとの表示量を安定させる。
+const DATES_PER_PAGE = 20;
 
 interface SearchParams {
   page?: string | string[];
@@ -256,11 +257,22 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Sea
   // 接続競合を悪化させる可能性が高いため、Promise.all をやめて直列 await にする。
   const totalAll = await prisma.meeting.count();
   const total = await prisma.meeting.count({ where });
-  const meetings = await prisma.meeting.findMany({
+
+  // 日付グループベースのページネーション:
+  // 1. フィルタ適用後のユニーク日付一覧を取得（降順）
+  const distinctDates = await prisma.meeting.groupBy({
+    by: ["date"],
     where,
     orderBy: { date: "desc" },
-    skip: (page - 1) * PAGE_SIZE,
-    take: PAGE_SIZE,
+  });
+  // 2. 当該ページの日付を切り出す
+  const pageDates = distinctDates
+    .map((d) => d.date)
+    .slice((page - 1) * DATES_PER_PAGE, page * DATES_PER_PAGE);
+  // 3. その日付に属する全会議を取得
+  const meetings = await prisma.meeting.findMany({
+    where: { AND: [where, { date: { in: pageDates } }] },
+    orderBy: { date: "desc" },
     include: { summary: { select: { agreementPoints: true, conflictPoints: true, keyTopics: true } } },
   });
 
@@ -283,7 +295,7 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Sea
 
   const activeFilterCount = [house, topic, person, committee, party, year].filter(Boolean).length;
   const hasActiveFilters = activeFilterCount > 0;
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(distinctDates.length / DATES_PER_PAGE));
 
   const dateGroups = new Map<string, typeof meetings>();
   for (const m of meetings) {
