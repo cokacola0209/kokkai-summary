@@ -17,10 +17,10 @@ export const metadata: Metadata = {
     "国会会議録の日付順一覧。テーマ・人物・委員会・院・会派・期間で絞り込みながら要点を見やすく確認できます。",
 };
 
-// ✅ 変更②: PAGE_SIZE を 200 → 15 に削減
+// ✅ 変更②: PAGE_SIZE を 200 → 60 に削減
 // 200件は1クエリで大量データを転送しDBへの負荷も高い。
-// 15件ならネットワーク転送量・メモリ使用量ともに約13分の1になる。
-const PAGE_SIZE = 15;
+// 60件なら転送量を抑えつつ、1ページに十分な日付グループを表示できる。
+const PAGE_SIZE = 60;
 
 interface SearchParams {
   page?: string | string[];
