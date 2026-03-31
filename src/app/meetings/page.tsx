@@ -237,11 +237,24 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Sea
     }
   }
 
+  // person フィルタ: Person テーブルから personId を引き、インデックス付きの
+  // personId で検索する。Person に未登録の名前の場合は従来の speaker contains にフォールバック。
+  let personFilter: Prisma.MeetingWhereInput = {};
+  if (person) {
+    const matched = await prisma.person.findUnique({
+      where: { name: person },
+      select: { id: true },
+    });
+    personFilter = matched
+      ? { speeches: { some: { personId: matched.id } } }
+      : { speeches: { some: { speaker: { contains: person, mode: "insensitive" } } } };
+  }
+
   const where: Prisma.MeetingWhereInput = {
     AND: [
       house ? { house } : {},
       topic ? { summary: { is: { keyTopics: { has: topic } } } } : {},
-      person ? { speeches: { some: { speaker: { contains: person, mode: "insensitive" } } } } : {},
+      personFilter,
       committee
         ? committee === "本会議"
           ? { nameOfMeeting: { contains: "本会議", mode: "insensitive" } }
