@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { unstable_cache } from "next/cache";
 import { AccordionDetails } from "@/components/Accordion";
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
@@ -18,8 +19,8 @@ import { isValidPersonName } from "@/lib/person-utils";
 // force-dynamic: build 時の prerender を止める。
 // connection_limit=1 環境では build 時に複数ページが同時 prerender すると
 // Prisma 内部プールの1本を奪い合い P2024 が発生するため。
-// データ取得は unstable_cache (Data Cache) でラップしており、
-// runtime でも revalidate 間隔に1回しか DB を叩かない。
+// データ取得は unstable_cache (Data Cache) でラップしており（getHomeData 参照）、
+// runtime では revalidate 間隔（5分）に1回しか DB を叩かない。
 export const dynamic = "force-dynamic";
 
 // PR1: generateMetadata を静的 metadata に置き換え
@@ -93,10 +94,12 @@ type HomeData = {
   editorNote: EditorNote;
 };
 
-// unstable_cache を外した純粋な直列取得。
-// revalidation 機構を経由しないため、framework 起因の接続競合を排除できる。
-// force-dynamic なので毎リクエスト実行されるが、クエリは全て軽量。
-async function getHomeData(): Promise<HomeData | null> {
+// トップページのデータ取得を1つの unstable_cache にまとめ、内部で直列実行する。
+// 1つの cache にまとめることで revalidation が常に1回だけ走り、
+// connection_limit=1 の Prisma プールで接続競合（P2024）が起きない。
+// force-dynamic は build 時 prerender 回避のため残すが、
+// Data Cache により runtime では revalidate 間隔に1回しか DB を叩かない。
+const getHomeData = unstable_cache(async (): Promise<HomeData | null> => {
   // ── 1. 最新日付 ──
   const latest = await prisma.meeting.findFirst({
     orderBy: { date: "desc" },
@@ -191,7 +194,7 @@ async function getHomeData(): Promise<HomeData | null> {
   });
 
   return { date, meetings, allTopics, partyBalance, recentBills, editorNote };
-}
+}, ["home-data"], { revalidate: 300 });
 
 // ──────────────────────────────────────────
 // ヘルパー関数（会議データの集計）
@@ -374,15 +377,17 @@ function PartyBalanceChart({
 }
 
 export default async function HomePage() {
-  // unstable_cache なし。Prisma が直接 Date を返すので復元不要。
   const data = await getHomeData();
 
-  const date = data?.date ?? null;
+  // unstable_cache を通すと Date が ISO 文字列になるため復元する
+  const date = data?.date ? new Date(data.date) : null;
   const meetings = data?.meetings ?? [];
   const allTopics = data?.allTopics ?? [];
   const partyBalance = data?.partyBalance ?? [];
   const recentBills = data?.recentBills ?? [];
-  const editorNote = data?.editorNote ?? null;
+  const editorNote = data?.editorNote
+    ? { ...data.editorNote, targetDate: new Date(data.editorNote.targetDate) }
+    : null;
 
   if (!date || meetings.length === 0) {
     return (
