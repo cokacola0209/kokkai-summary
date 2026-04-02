@@ -207,6 +207,27 @@ const getTodayMeetings = unstable_cache(
   { revalidate: 300 } // 5分キャッシュ
 );
 
+// ✅ 変更⑥: getTotalAll を unstable_cache でラップ（1時間キャッシュ）
+// 全件カウントは searchParams に依存しない。毎回叩く必要がない。
+const getTotalAll = unstable_cache(
+  async () => prisma.meeting.count(),
+  ["meetings-total-all"],
+  { revalidate: 3600 }
+);
+
+// ✅ 変更⑦: getHouseGroups を unstable_cache でラップ（1時間キャッシュ）
+// 院別集計も searchParams に依存しない。フィルタUI用の固定データ。
+const getHouseGroups = unstable_cache(
+  async () =>
+    prisma.meeting.groupBy({
+      by: ["house"],
+      _count: true,
+      orderBy: { _count: { house: "desc" } },
+    }),
+  ["meetings-house-groups"],
+  { revalidate: 3600 }
+);
+
 export default async function MeetingsPage({ searchParams }: { searchParams: SearchParams }) {
   const page = Math.max(1, Number(getSingleParam(searchParams.page) ?? 1));
   const house = getSingleParam(searchParams.house);
@@ -253,9 +274,10 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Sea
     ],
   };
 
-  // 直列実行: connection_limit=1 環境では同時的な DB 要求が
-  // 接続競合を悪化させる可能性が高いため、Promise.all をやめて直列 await にする。
-  const totalAll = await prisma.meeting.count();
+  // searchParams 非依存のクエリはキャッシュ済み関数から取得
+  const totalAll = await getTotalAll();
+
+  // searchParams 依存のクエリは直列実行（connection_limit=1 のため）
   const total = await prisma.meeting.count({ where });
 
   // 日付グループベースのページネーション:
@@ -276,11 +298,7 @@ export default async function MeetingsPage({ searchParams }: { searchParams: Sea
     include: { summary: { select: { agreementPoints: true, conflictPoints: true, keyTopics: true } } },
   });
 
-  const houses = await prisma.meeting.groupBy({
-    by: ["house"],
-    _count: true,
-    orderBy: { _count: { house: "desc" } },
-  });
+  const houses = await getHouseGroups();
 
   // キャッシュ済み関数を並列実行（DBは叩かずキャッシュから返る）
   const [filterOptions, yearMonths, todayMeetings] = await Promise.all([
